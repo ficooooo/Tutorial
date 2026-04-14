@@ -5,6 +5,7 @@
 
 #include <QDomDocument>
 #include <QString>
+#include <QStringList>
 
 #include <AIS_InteractiveContext.hxx>
 #include <AIS_Shape.hxx>
@@ -32,6 +33,14 @@ class NloptInverseKinematics;
 class DL_RobotContext
 {
 public:
+    enum LoadMode
+    {
+        LoadMode_None = 0,
+        LoadMode_AssemblyPreview,
+        LoadMode_SplitPreview,
+        LoadMode_RobotPackage
+    };
+
     explicit DL_RobotContext(const Handle(AIS_InteractiveContext)& theContext);
     ~DL_RobotContext();
 //--------------------------------------------------------------------------------------------
@@ -98,6 +107,10 @@ public:
     bool splitStepFile(const QString& theFileName);
     void disasRobot(QWidget* theParent = nullptr);
     bool isLoaded() const;
+    bool canSplit() const;
+    bool canWriteXml() const;
+    bool canDrive() const;
+    LoadMode loadMode() const;
 
     static void writeRobotXml(QWidget* theParent = nullptr);
 
@@ -112,6 +125,13 @@ private:
                                              const gp_Dir& theNormal,
                                              const gp_Dir& theXAxis);
     static QString        findSampleImage(const char* theFileName);
+    static QStringList    collectRodFiles(const QString& theDirectoryPath);
+    int                   loadAssemblyPreview(const QString& theFileName, QWidget* theParent);
+    int                   loadRobotPackage(const QString& theFileName, QWidget* theParent);
+    bool                  parseMainXml(const QString& theFileName,
+                                       QString&       theMdlFileName,
+                                       QStringList&   theRodFileNames,
+                                       QString&       theErrorMessage) const;
 
 private:
     double m_paramR;
@@ -122,6 +142,10 @@ private:
     double m_paramD;
     double m_paramW;
     bool   m_isPose1;
+    LoadMode   m_loadMode;
+    QString    m_robotMainFileName;
+    QString    m_currentAssemblyFileName;
+    QStringList m_rodFileNames;
 
 public:
     void setContext(const Handle(AIS_InteractiveContext)& theContext) { m_context = theContext; }

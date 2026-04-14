@@ -56,7 +56,7 @@ static const char* ROBOT_XML_TEMPLATE = R"(<?xml version="1.0" encoding="UTF-8"?
 
 DL_RobotContext::DL_RobotContext(const Handle(AIS_InteractiveContext)& theContext)
 : m_context(theContext), m_paramR(0.0), m_paramH(0.0), m_paramL2(0.0), m_paramS(0.0),
-  m_paramL3(0.0), m_paramD(0.0), m_paramW(0.0), m_isPose1(true)
+  m_paramL3(0.0), m_paramD(0.0), m_paramW(0.0), m_isPose1(true), m_loadMode(LoadMode_None)
 {
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i) { m_listJoints_angles[i] = 0.0; m_listJoints_angles0[i] = 0.0; }
 }
@@ -68,6 +68,10 @@ const double* DL_RobotContext::getPositions() const { return m_listJoints_angles
 int DL_RobotContext::getRodShapeCount() const { return DL_ROBOT_JOINT_COUNT + 1; }
 Handle(AIS_Shape) DL_RobotContext::getRodShape(int theIndex) const { return (theIndex >= 0 && theIndex <= DL_ROBOT_JOINT_COUNT) ? m_listRods[theIndex] : nullptr; }
 bool DL_RobotContext::isLoaded() const { return !m_context.IsNull() && m_rl_mdl_KinematicModel && !m_listRods[0].IsNull() && !m_listRods[DL_ROBOT_JOINT_COUNT].IsNull(); }
+bool DL_RobotContext::canSplit() const { return !m_context.IsNull(); }
+bool DL_RobotContext::canWriteXml() const { return !m_context.IsNull(); }
+bool DL_RobotContext::canDrive() const { return isLoaded(); }
+DL_RobotContext::LoadMode DL_RobotContext::loadMode() const { return m_loadMode; }
 
 double DL_RobotContext::getPosition(int theJointIndex) const
 {
@@ -202,6 +206,180 @@ QString DL_RobotContext::findSampleImage(const char* theFileName)
     return QString();
 }
 
+QStringList DL_RobotContext::collectRodFiles(const QString& theDirectoryPath)
+{
+    QDir aDir(theDirectoryPath);
+    QStringList aFilters;
+    aFilters << "ROD*.stp" << "ROD*.step";
+    return aDir.entryList(aFilters, QDir::Files, QDir::Name | QDir::IgnoreCase);
+}
+
+bool DL_RobotContext::parseMainXml(const QString& theFileName,
+                                   QString&       theMdlFileName,
+                                   QStringList&   theRodFileNames,
+                                   QString&       theErrorMessage) const
+{
+    QFile aFile(theFileName);
+    if (!aFile.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        theErrorMessage = QString::fromLocal8Bit("主 XML 无法打开。");
+        return false;
+    }
+
+    QDomDocument aDocument;
+    if (!aDocument.setContent(&aFile))
+    {
+        theErrorMessage = QString::fromLocal8Bit("主 XML 无法解析。");
+        return false;
+    }
+
+    QDomElement aRoot = aDocument.documentElement();
+    if (aRoot.tagName() != "robot_main")
+    {
+        theErrorMessage = QString::fromLocal8Bit("当前 XML 不是 robot_main 入口文件。");
+        return false;
+    }
+
+    QDomElement aMdlNode = aRoot.firstChildElement("mdl");
+    QString aMdlHref = aMdlNode.attribute("href").trimmed();
+    if (aMdlHref.isEmpty())
+    {
+        theErrorMessage = QString::fromLocal8Bit("主 XML 中缺失 mdl 路径。");
+        return false;
+    }
+
+    theMdlFileName = QDir(QFileInfo(theFileName).absolutePath()).filePath(aMdlHref);
+
+    QDomElement aRodsNode = aRoot.firstChildElement("rods");
+    for (QDomElement aRodNode = aRodsNode.firstChildElement("rod");
+         !aRodNode.isNull();
+         aRodNode = aRodNode.nextSiblingElement("rod"))
+    {
+        QString aFileName = aRodNode.attribute("file").trimmed();
+        if (!aFileName.isEmpty())
+        {
+            theRodFileNames << aFileName;
+        }
+    }
+
+    if (theRodFileNames.isEmpty())
+    {
+        theErrorMessage = QString::fromLocal8Bit("主 XML 中缺失杆件文件名列表。");
+        return false;
+    }
+
+    return true;
+}
+
+int DL_RobotContext::loadAssemblyPreview(const QString& theFileName, QWidget* theParent)
+{
+    if (m_context.IsNull() || theFileName.isEmpty()) return 0;
+
+    Handle(AIS_Shape) anAssemblyShape = loadStp(theFileName.toLocal8Bit().constData());
+    if (anAssemblyShape.IsNull())
+    {
+        QMessageBox::warning(theParent, "Tips", QString::fromLocal8Bit("整机 STP 载入失败。"));
+        return 0;
+    }
+
+    clearRobotPresentation();
+
+    m_robotMainFileName.clear();
+    m_robotXmlFileName.clear();
+    m_robotXmlDocument.clear();
+    m_rodFileNames.clear();
+    m_robotDirPath = QFileInfo(theFileName).absolutePath();
+    m_currentAssemblyFileName = theFileName;
+    m_loadMode = LoadMode_AssemblyPreview;
+
+    m_listRods[0] = anAssemblyShape;
+    m_context->SetDisplayMode(anAssemblyShape, 1, Standard_False);
+    m_context->Display(anAssemblyShape, Standard_False);
+    m_context->UpdateCurrentViewer();
+    return 0;
+}
+
+int DL_RobotContext::loadRobotPackage(const QString& theFileName, QWidget* theParent)
+{
+    if (m_context.IsNull() || theFileName.isEmpty()) return 0;
+
+    QFile aFile(theFileName);
+    if (!aFile.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(theParent, "Tips", QString::fromLocal8Bit("XML 文件无法打开。"));
+        return 0;
+    }
+
+    QDomDocument aDocument;
+    if (!aDocument.setContent(&aFile))
+    {
+        QMessageBox::warning(theParent, "Tips", QString::fromLocal8Bit("XML 文件无法解析。"));
+        return 0;
+    }
+
+    QString aDirPath = QFileInfo(theFileName).absolutePath();
+    QString aMdlFileName = theFileName;
+    QStringList aRodFileNames;
+
+    QDomElement aRoot = aDocument.documentElement();
+    if (aRoot.tagName() == "robot_main")
+    {
+        QString anErrorMessage;
+        if (!parseMainXml(theFileName, aMdlFileName, aRodFileNames, anErrorMessage))
+        {
+            QMessageBox::warning(theParent, "Tips", anErrorMessage);
+            return 0;
+        }
+        m_robotMainFileName = theFileName;
+    }
+    else if (aRoot.tagName() == "rlmdl")
+    {
+        aRodFileNames = collectRodFiles(aDirPath);
+        m_robotMainFileName.clear();
+    }
+    else
+    {
+        QMessageBox::warning(theParent, "Tips", QString::fromLocal8Bit("当前 XML 既不是主 XML，也不是 rlmdl XML。"));
+        return 0;
+    }
+
+    if (aRodFileNames.size() != DL_ROBOT_JOINT_COUNT + 1)
+    {
+        QMessageBox::warning(theParent, "Tips",
+                             QString::fromLocal8Bit("当前模型需要 %1 个杆件文件，实际检测到 %2 个。")
+                             .arg(DL_ROBOT_JOINT_COUNT + 1)
+                             .arg(aRodFileNames.size()));
+        return 0;
+    }
+
+    m_robotDirPath = aDirPath;
+    m_robotXmlFileName = aMdlFileName;
+    m_rodFileNames = aRodFileNames;
+    m_currentAssemblyFileName.clear();
+    if (!loadRobotXml())
+    {
+        QMessageBox::warning(theParent, "Tips", QString::fromLocal8Bit("mdl XML 缺失或无法解析。"));
+        return 0;
+    }
+
+    try
+    {
+        clearRobotPresentation();
+        m_loadMode = LoadMode_RobotPackage;
+        loadAll();
+        m_context->UpdateCurrentViewer();
+        return DL_ROBOT_JOINT_COUNT;
+    }
+    catch (const std::exception& e)
+    {
+        clearRobotPresentation();
+        m_loadMode = LoadMode_None;
+        std::printf("加载机器人失败: %s\n", e.what());
+        QMessageBox::warning(theParent, "Tips", QString("Load robot failed: %1").arg(e.what()));
+        return 0;
+    }
+}
+
 void DL_RobotContext::clearRobotPresentation()
 {
     if (!m_context.IsNull())
@@ -241,10 +419,12 @@ void DL_RobotContext::updateTraceLine()
 void DL_RobotContext::loadAISShapes()
 {
     if (m_robotXmlDocument.isNull()) throw std::runtime_error("robot.xml not loaded");
+    if (m_rodFileNames.size() != DL_ROBOT_JOINT_COUNT + 1) throw std::runtime_error("rod file list is incomplete");
 
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
     {
-        QString aStpPath = QDir(m_robotDirPath).filePath(QString("ROD_1_%1.stp").arg(i + 1));
+        QString aRodFileName = m_rodFileNames.at(i);
+        QString aStpPath = QFileInfo(aRodFileName).isAbsolute() ? aRodFileName : QDir(m_robotDirPath).filePath(aRodFileName);
         m_listRods[i] = loadStp(aStpPath.toLocal8Bit().constData());
         if (m_listRods[i].IsNull()) throw std::runtime_error(QString("load rod failed: %1").arg(aStpPath).toStdString());
     }
@@ -257,7 +437,7 @@ void DL_RobotContext::loadAISShapes()
     m_paramL2 = getFixedVal("fixed3", "z") * 1000.0;
     m_paramS = getFixedVal("fixed4", "z") * 1000.0;
     m_paramL3 = getFixedVal("fixed5", "x") * 1000.0;
-    m_paramD = getFixedVal("fixed6", "y") * 1000.0;上网行为行为
+    m_paramD = getFixedVal("fixed6", "y") * 1000.0;
     double tx7 = getFixedVal("fixed7", "x");
     double tz7 = getFixedVal("fixed7", "z");
     m_isPose1 = std::abs(tx7) > 0.0001;
@@ -350,9 +530,18 @@ rl::math::Transform DL_RobotContext::forwardSolve(const double theAngles[], bool
 int DL_RobotContext::loadRobotDynamic(QWidget* theParent)
 {
     if (m_context.IsNull()) return 0;
-    QString aDirPath = QFileDialog::getExistingDirectory(theParent, "choose files", m_robotDirPath);
-    if (aDirPath.isEmpty()) return 0;
-    return loadRobot(aDirPath, theParent);
+    QString aStartPath = m_robotDirPath;
+    if (aStartPath.isEmpty() && !m_currentAssemblyFileName.isEmpty())
+    {
+        aStartPath = QFileInfo(m_currentAssemblyFileName).absolutePath();
+    }
+
+    QString aFilePath = QFileDialog::getOpenFileName(theParent,
+                                                     "choose robot entry",
+                                                     aStartPath,
+                                                     "Robot Entry (*.xml *.stp *.step)");
+    if (aFilePath.isEmpty()) return 0;
+    return loadRobot(aFilePath, theParent);
 }
 
 int DL_RobotContext::loadRobot(const QString& theDirPath, QWidget* theParent)
@@ -360,24 +549,25 @@ int DL_RobotContext::loadRobot(const QString& theDirPath, QWidget* theParent)
     if (m_context.IsNull()) return 0;
     if (theDirPath.isEmpty()) return 0;
 
-    m_robotDirPath = theDirPath;
-    m_robotXmlFileName = QDir(theDirPath).filePath("robot.xml");
-    if (!loadRobotXml()) { std::printf("错误：缺失或无法解析 robot.xml 文件。\n"); QMessageBox::warning(theParent, "Tips", "robot.xml missing or invalid."); return 0; }
+    QFileInfo aPathInfo(theDirPath);
+    if (aPathInfo.isDir())
+    {
+        return loadRobotPackage(QDir(theDirPath).filePath("robot.xml"), theParent);
+    }
 
-    try
+    QString aSuffix = aPathInfo.suffix().toLower();
+    if ("stp" == aSuffix || "step" == aSuffix)
     {
-        clearRobotPresentation();
-        loadAll();
-        if (!m_context.IsNull()) m_context->UpdateCurrentViewer();
-        return DL_ROBOT_JOINT_COUNT;
+        return loadAssemblyPreview(theDirPath, theParent);
     }
-    catch (const std::exception& e)
+
+    if ("xml" == aSuffix)
     {
-        clearRobotPresentation();
-        std::printf("加载机器人失败: %s\n", e.what());
-        QMessageBox::warning(theParent, "Tips", QString("Load robot failed: %1").arg(e.what()));
-        return 0;
+        return loadRobotPackage(theDirPath, theParent);
     }
+
+    QMessageBox::warning(theParent, "Tips", QString::fromLocal8Bit("当前文件类型不支持载入。"));
+    return 0;
 }
 
 void DL_RobotContext::moveJoint(int theIndex, int theForward)
@@ -434,7 +624,11 @@ void DL_RobotContext::disasRobot(QWidget* theParent)
     if (m_context.IsNull()) return;
     std::printf("--- 开始执行拆分流程 ---\n");
 
-    QString aFileName = QFileDialog::getOpenFileName(theParent, "choose stp or step", QString(), "STEP Files (*.stp *.step)");
+    QString aFileName = m_currentAssemblyFileName;
+    if (aFileName.isEmpty())
+    {
+        aFileName = QFileDialog::getOpenFileName(theParent, "choose stp or step", QString(), "STEP Files (*.stp *.step)");
+    }
     if (aFileName.isEmpty()) return;
     splitStepFile(aFileName);
 }
@@ -452,9 +646,11 @@ bool DL_RobotContext::splitStepFile(const QString& theFileName)
     TopoDS_Compound aWholeCompound;
     BRep_Builder aBuilder;
     aBuilder.MakeCompound(aWholeCompound);
+    clearRobotPresentation();
 
     int aShapesNumber = aReader.NbShapes();
     Standard_Real anOffset = 500.0;
+    QStringList aRodFileNames;
     for (int i = 1; i <= aShapesNumber; ++i)
     {
         TopoDS_Shape aRootShape = aReader.Shape(i);
@@ -464,6 +660,7 @@ bool DL_RobotContext::splitStepFile(const QString& theFileName)
             TopoDS_Shape aPart = it.Value();
             ++aPartIndex;
             QString anOutputName = QString("%1/ROD_%2_%3.stp").arg(aSaveDir).arg(i).arg(aPartIndex);
+            aRodFileNames << QFileInfo(anOutputName).fileName();
 
             STEPControl_Writer aWriter;
             aWriter.Transfer(aPart, STEPControl_AsIs);
@@ -484,6 +681,13 @@ bool DL_RobotContext::splitStepFile(const QString& theFileName)
     Handle(AIS_Shape) anAisWhole = new AIS_Shape(aWholeCompound);
     m_context->SetDisplayMode(anAisWhole, 1, Standard_False);
     m_context->Display(anAisWhole, Standard_True);
+    m_currentAssemblyFileName = aFileName;
+    m_robotDirPath = aSaveDir;
+    m_robotXmlFileName.clear();
+    m_robotMainFileName.clear();
+    m_robotXmlDocument.clear();
+    m_rodFileNames = aRodFileNames;
+    m_loadMode = LoadMode_SplitPreview;
     std::printf("--- 拆分显示完成 ---\n");
     return true;
 }

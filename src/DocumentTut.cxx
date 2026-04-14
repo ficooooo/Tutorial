@@ -228,6 +228,11 @@ void ApplicationTut::onRobotDisas()
 	if (aDocument != NULL)
 	{
 		aDocument->getRobot()->disasRobot(getWorkspace());
+        updateRobotActionStates();
+        if (aDocument->getRobot()->loadMode() == DL_RobotContext::LoadMode_SplitPreview)
+        {
+            statusBar()->showMessage(QString::fromLocal8Bit("拆分预览已完成，可继续编写主 XML 和 mdl XML。"), 5000);
+        }
 	}
     else
     {

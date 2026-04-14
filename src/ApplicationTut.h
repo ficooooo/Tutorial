@@ -4,6 +4,8 @@
 #include "DocumentTut.h"
 #include "ApplicationCommon.h"
 
+class QAction;
+
 class ApplicationTut: public ApplicationCommonWindow
 {
     Q_OBJECT
@@ -25,8 +27,17 @@ public slots:
     void            onRobotWrite();
 private:
 	void            createMakeBottleOperation();
+    void            updateRobotActionStates();
 private:
 	QToolBar*		myMakeBottleBar;
+    QAction*        myLoadRobotAction;
+    QAction*        mySplitRobotAction;
+    QAction*        myWriteRobotAction;
+    QAction*        myJointSelectAction;
+    QAction*        myJointForwardAction;
+    QAction*        myJointBackwardAction;
+    QAction*        myRobotResetAction;
+    QAction*        myRobotCalcAction;
 	int				nCurrentJoint_Index;
 	int				nMaxJoint_Count;
 };
