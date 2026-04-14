@@ -218,6 +218,7 @@ void DL_RobotContext::clearRobotPresentation()
 
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i) m_listRods[i].Nullify();
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i) m_listJoints_angles[i] = 0.0;
+    m_previewStepFileName.clear();
     m_traceLine.Nullify();
     m_endTrihedron.Nullify();
     m_rl_mdl_IKSolver.reset();
@@ -350,9 +351,48 @@ rl::math::Transform DL_RobotContext::forwardSolve(const double theAngles[], bool
 int DL_RobotContext::loadRobotDynamic(QWidget* theParent)
 {
     if (m_context.IsNull()) return 0;
-    QString aDirPath = QFileDialog::getExistingDirectory(theParent, "choose files", m_robotDirPath);
-    if (aDirPath.isEmpty()) return 0;
-    return loadRobot(aDirPath, theParent);
+
+    QString aStartPath;
+    if (!m_previewStepFileName.isEmpty())
+        aStartPath = m_previewStepFileName;
+    else
+        aStartPath = m_robotXmlFileName.isEmpty() ? m_robotDirPath : m_robotXmlFileName;
+    QString aFileName = QFileDialog::getOpenFileName(
+        theParent,
+        "Choose robot XML or STEP file",
+        aStartPath,
+        "Robot XML (*.xml);;STEP Files (*.stp *.step)");
+    if (aFileName.isEmpty()) return 0;
+
+    QFileInfo aInfo(aFileName);
+    QString aSuffix = aInfo.suffix().toLower();
+    if ("xml" == aSuffix)
+    {
+        return loadRobotFromXml(aFileName, theParent);
+    }
+
+    if ("stp" == aSuffix || "step" == aSuffix)
+    {
+        return previewStepFile(aFileName, theParent) ? -1 : 0;
+    }
+
+    QMessageBox::warning(theParent, "Tips", "Please choose a robot XML file or a STEP file.");
+    return 0;
+}
+
+int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* theParent)
+{
+    if (theXmlFileName.isEmpty()) return 0;
+
+    QFileInfo aInfo(theXmlFileName);
+    m_robotXmlFileName = aInfo.absoluteFilePath();
+    m_robotDirPath = aInfo.absolutePath();
+
+    QMessageBox::information(
+        theParent,
+        "Tips",
+        QString("XML entry loading is reserved and not implemented yet.\nSelected file:\n%1").arg(m_robotXmlFileName));
+    return -2;
 }
 
 int DL_RobotContext::loadRobot(const QString& theDirPath, QWidget* theParent)
@@ -362,6 +402,7 @@ int DL_RobotContext::loadRobot(const QString& theDirPath, QWidget* theParent)
 
     m_robotDirPath = theDirPath;
     m_robotXmlFileName = QDir(theDirPath).filePath("robot.xml");
+    m_previewStepFileName.clear();
     if (!loadRobotXml()) { std::printf("错误：缺失或无法解析 robot.xml 文件。\n"); QMessageBox::warning(theParent, "Tips", "robot.xml missing or invalid."); return 0; }
 
     try
@@ -378,6 +419,27 @@ int DL_RobotContext::loadRobot(const QString& theDirPath, QWidget* theParent)
         QMessageBox::warning(theParent, "Tips", QString("Load robot failed: %1").arg(e.what()));
         return 0;
     }
+}
+
+bool DL_RobotContext::previewStepFile(const QString& theFileName, QWidget* theParent)
+{
+    if (m_context.IsNull() || theFileName.isEmpty()) return false;
+
+    clearRobotPresentation();
+
+    Handle(AIS_Shape) aPreviewShape = loadStp(theFileName.toLocal8Bit().constData());
+    if (aPreviewShape.IsNull())
+    {
+        QMessageBox::warning(theParent, "Tips", "Load STEP preview failed.");
+        return false;
+    }
+
+    m_context->SetDisplayMode(aPreviewShape, 1, Standard_False);
+    m_context->Display(aPreviewShape, Standard_False);
+    m_context->UpdateCurrentViewer();
+    m_previewStepFileName = QFileInfo(theFileName).absoluteFilePath();
+    m_robotDirPath = QFileInfo(theFileName).absolutePath();
+    return true;
 }
 
 void DL_RobotContext::moveJoint(int theIndex, int theForward)
@@ -434,7 +496,12 @@ void DL_RobotContext::disasRobot(QWidget* theParent)
     if (m_context.IsNull()) return;
     std::printf("--- 开始执行拆分流程 ---\n");
 
-    QString aFileName = QFileDialog::getOpenFileName(theParent, "choose stp or step", QString(), "STEP Files (*.stp *.step)");
+    QString aFileName = m_previewStepFileName;
+    if (aFileName.isEmpty() || !QFileInfo::exists(aFileName))
+    {
+        QString aStartPath = !m_previewStepFileName.isEmpty() ? m_previewStepFileName : m_robotDirPath;
+        aFileName = QFileDialog::getOpenFileName(theParent, "choose stp or step", aStartPath, "STEP Files (*.stp *.step)");
+    }
     if (aFileName.isEmpty()) return;
     splitStepFile(aFileName);
 }

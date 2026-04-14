@@ -153,6 +153,18 @@ void ApplicationTut::onMakeBottleAction()
     {
         statusBar()->showMessage(QString("Current Joint: J#")+QString::number(nCurrentJoint_Index+1)+" of "+QString::number(nMaxJoint_Count));
     }
+    else if (nMaxJoint_Count < 0)
+    {
+        if (nMaxJoint_Count == -2)
+        {
+            statusBar()->showMessage("XML entry loading is reserved.", 5000);
+        }
+        else
+        {
+            statusBar()->showMessage("Single STEP preview loaded.", 5000);
+        }
+        nMaxJoint_Count = 0;
+    }
 }
 
 

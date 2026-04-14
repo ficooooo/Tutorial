@@ -42,6 +42,7 @@ private://两个库共用的数据
     gp_Ax1      m_listJoints[DL_ROBOT_JOINT_COUNT];
     QString     m_robotXmlFileName;
     QString     m_robotDirPath;
+    QString     m_previewStepFileName;
     QDomDocument m_robotXmlDocument;
 public:
     void          setPositions(const double* theAngles);
@@ -94,6 +95,8 @@ public://两个库之间的核心数据(结构)转换
 public:
     int  loadRobot(const QString& theDirPath, QWidget* theParent = nullptr);
     int  loadRobotDynamic(QWidget* theParent = nullptr);
+    int  loadRobotFromXml(const QString& theXmlFileName, QWidget* theParent = nullptr);
+    bool previewStepFile(const QString& theFileName, QWidget* theParent = nullptr);
     void moveJoint(int theIndex, int theForward = 1);
     void calcRobot();
     bool splitStepFile(const QString& theFileName);
