@@ -1,0 +1,28 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION (( 'STEP AP214' ),
+    '1' );
+FILE_NAME ('Coneyor01.STEP',
+    '2017-06-13T06:15:22',
+    ( '微软用户' ),
+    ( '微软中国' ),
+    'SwSTEP 2.0',
+    'SolidWorks 2015',
+    '' );
+FILE_SCHEMA (( 'AUTOMOTIVE_DESIGN' ));
+ENDSEC;
+
+DATA;
+#1 = PRODUCT_RELATED_PRODUCT_CATEGORY ( 'part', '', ( #5 ) ) ;
+#2 = APPLICATION_CONTEXT ( 'automotive_design' ) ;
+#3 = APPLICATION_PROTOCOL_DEFINITION ( 'draft international standard', 'automotive_design', 1998, #10 ) ;
+#4 = APPLICATION_PROTOCOL_DEFINITION ( 'draft international standard', 'automotive_design', 1998, #2 ) ;
+#5 = PRODUCT ( 'Coneyor01', 'Coneyor01', '', ( #8 ) ) ;
+#6 = PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE ( '任何', '', #5, .NOT_KNOWN. ) ;
+#7 = PRODUCT_DEFINITION ( '未知', '', #6, #11 ) ;
+#8 = PRODUCT_CONTEXT ( 'NONE', #2, 'mechanical' ) ;
+#9 = PRODUCT_DEFINITION_SHAPE ( 'NONE', 'NONE',  #7 ) ;
+#10 = APPLICATION_CONTEXT ( 'automotive_design' ) ;
+#11 = PRODUCT_DEFINITION_CONTEXT ( 'detailed design', #10, 'design' ) ;
+ENDSEC;
+END-ISO-10303-21;

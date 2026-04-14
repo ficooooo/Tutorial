@@ -1,0 +1,44 @@
+﻿# IDE and user-specific files
+.vs/
+*.user
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Build output directories
+debug/
+release/
+win/
+win64/
+
+# Generated project/build files
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+.qmake.stash
+Makefile
+Makefile.Debug
+Makefile.Release
+
+# Object and binary artifacts
+*.obj
+*.o
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.exe
+*.dll
+*.log
+NUL.obj
+
+# Qt generated files
+moc_*.cpp
+*.qm
+*.autosave
+
+# Local environment overrides
+custom.bat
+custom.sh

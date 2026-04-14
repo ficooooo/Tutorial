@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS><TS version="1.1" language="ru_RU">
+<context>
+    <name>QObject</name>
+	<message>
+        <source>ICON_MAKE_BOTTLE</source>
+        <translation>Bottle.png</translation>
+    </message>
+    <message>
+        <source>ICON_JOINT_FWORD</source>
+        <translation>JointF.png</translation>
+    </message>
+    <message>
+        <source>ICON_JOINT_BWORD</source>
+        <translation>JointB.png</translation>
+    </message>
+    <message>
+        <source>ICON_JOINT_SELECT</source>
+        <translation>JointS.png</translation>
+    </message>
+      <message>
+        <source>ICON_ROBOT_RESET</source>
+        <translation>JointR.png</translation>
+    </message>
+    <message>
+        <source>ICON_ROBOT_CALC</source>
+        <translation>JointC.png</translation>
+    </message>
+    <message>
+            <source>ICON_ROBOT_DISAS</source>
+            <translation>Disassemble.png</translation>
+    </message>
+    <message>
+            <source>ICON_ROBOT_WRITE</source>
+            <translation>Write.png</translation>
+    </message>
+</context>
+</TS>
