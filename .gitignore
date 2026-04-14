@@ -11,6 +11,7 @@ debug/
 release/
 win/
 win64/
+win64 /
 
 # Generated project/build files
 *.sln
