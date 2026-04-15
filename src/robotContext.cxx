@@ -52,6 +52,157 @@
 namespace
 {
 static const char* ROBOT_XML_TEMPLATE = R"(<?xml version="1.0" encoding="UTF-8"?><rlmdl xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="rlmdl.xsd"><model><manufacturer>Huashu</manufacturer><name>HSR-CR630-1750</name><world id="world"><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation><g><x>0</x><y>0</y><z>9.86055</z></g></world><body id="body0"><ignore/><ignore idref="body1"/></body><frame id="frame0"/><frame id="frame1"/><body id="body1"><ignore idref="body0"/><ignore idref="body2"/></body><frame id="frame2"/><body id="body2"><ignore idref="body1"/><ignore idref="body3"/><ignore idref="body4"/></body><frame id="frame3"/><body id="body3"><ignore idref="body2"/><ignore idref="body4"/></body><frame id="frame4"/><body id="body4"><ignore idref="body2"/><ignore idref="body3"/><ignore idref="body5"/><ignore idref="body6"/></body><frame id="frame5"/><body id="body5"><ignore idref="body4"/><ignore idref="body6"/></body><frame id="frame6"/><body id="body6"><ignore idref="body4"/><ignore idref="body5"/></body><frame id="frame7"/><fixed id="fixed0"><frame><a idref="world"/><b idref="body0"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed><fixed id="fixed1"><frame><a idref="body0"/><b idref="frame0"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed><revolute id="joint0"><frame><a idref="frame0"/><b idref="frame1"/></frame><axis><x>0</x><y>0</y><z>1</z></axis><max>360</max><min>-360</min><speed>187</speed></revolute><fixed id="fixed2"><frame><a idref="frame1"/><b idref="body1"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0.5015</z></translation></fixed><revolute id="joint1"><frame><a idref="body1"/><b idref="frame2"/></frame><axis><x>0</x><y>1</y><z>0</z></axis><max>360</max><min>-360</min><speed>160</speed></revolute><fixed id="fixed3"><frame><a idref="frame2"/><b idref="body2"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0.950</z></translation></fixed><revolute id="joint2"><frame><a idref="body2"/><b idref="frame3"/></frame><axis><x>0</x><y>1</y><z>0</z></axis><max>360</max><min>-360</min><speed>180</speed></revolute><fixed id="fixed4"><frame><a idref="frame3"/><b idref="body3"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed><revolute id="joint3"><frame><a idref="body3"/><b idref="frame4"/></frame><axis><x>1</x><y>0</y><z>0</z></axis><max>360</max><min>-360</min><speed>260</speed></revolute><fixed id="fixed5"><frame><a idref="frame4"/><b idref="body4"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0.615</x><y>0</y><z>0</z></translation></fixed><revolute id="joint4"><frame><a idref="body4"/><b idref="frame5"/></frame><axis><x>0</x><y>1</y><z>0</z></axis><max>360</max><min>-360</min><speed>230</speed></revolute><fixed id="fixed6"><frame><a idref="frame5"/><b idref="body5"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>-0.177</y><z>-0.185</z></translation></fixed><revolute id="joint5"><frame><a idref="body5"/><b idref="frame6"/></frame><axis><x>0</x><y>0</y><z>1</z></axis><max>360</max><min>-360</min><speed>360</speed></revolute><fixed id="fixed7"><frame><a idref="frame6"/><b idref="body6"/></frame><rotation><x>0</x><y>0</y><z>1</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed><fixed id="fixed8"><frame><a idref="body6"/><b idref="frame7"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed></model></rlmdl>)";
+static const char* DEFAULT_ROD_NAMES[DL_ROBOT_JOINT_COUNT + 1] =
+{
+    "Base", "Shoulder", "UpperArm", "ForeArm", "Wrist1", "Wrist2", "Flange"
+};
+
+QDomElement ensureChildElement(QDomDocument& theDocument, QDomElement theParent, const QString& theTag)
+{
+    QDomElement aNode = theParent.firstChildElement(theTag);
+    if (aNode.isNull())
+    {
+        aNode = theDocument.createElement(theTag);
+        theParent.appendChild(aNode);
+    }
+    return aNode;
+}
+
+void updateTextNode(QDomDocument& theDocument, QDomElement theParent, const QString& theTag, const QString& theValue)
+{
+    QDomElement aNode = ensureChildElement(theDocument, theParent, theTag);
+    if (aNode.firstChild().isNull())
+        aNode.appendChild(theDocument.createTextNode(theValue));
+    else
+        aNode.firstChild().setNodeValue(theValue);
+}
+
+void setFixedTranslation(QDomDocument& theDocument,
+                         const QString& theId,
+                         const QString& theX,
+                         const QString& theY,
+                         const QString& theZ)
+{
+    QDomNodeList aNodes = theDocument.elementsByTagName("fixed");
+    for (int i = 0; i < aNodes.count(); ++i)
+    {
+        QDomElement aFixed = aNodes.at(i).toElement();
+        if (aFixed.attribute("id") != theId) continue;
+        QDomElement aTranslation = ensureChildElement(theDocument, aFixed, "translation");
+        updateTextNode(theDocument, aTranslation, "x", theX);
+        updateTextNode(theDocument, aTranslation, "y", theY);
+        updateTextNode(theDocument, aTranslation, "z", theZ);
+        return;
+    }
+}
+
+void fillJointDefaults(bool theIsPose1,
+                       QStringList& theAxisX,
+                       QStringList& theAxisY,
+                       QStringList& theAxisZ,
+                       QStringList& theMinVals,
+                       QStringList& theMaxVals,
+                       QStringList& theSpeedVals)
+{
+    theAxisX = QStringList() << "0" << "0" << "0" << "1" << "0" << "1";
+    theAxisY = QStringList() << "0" << "1" << "1" << "0" << "1" << "0";
+    theAxisZ = QStringList() << "1" << "0" << "0" << "0" << "0" << "0";
+    if (!theIsPose1)
+    {
+        theAxisX[5] = "0";
+        theAxisZ[5] = "1";
+    }
+
+    theMinVals = QStringList() << "-360" << "-360" << "-360" << "-360" << "-360" << "-360";
+    theMaxVals = QStringList() << "360" << "360" << "360" << "360" << "360" << "360";
+    theSpeedVals = QStringList() << "187" << "160" << "180" << "260" << "230" << "360";
+}
+
+bool buildRobotMdlDocument(const QString& theManufacturer,
+                           const QString& theModelName,
+                           const bool     theIsPose1,
+                           const QStringList& theDimensions,
+                           const QStringList& theAxisX,
+                           const QStringList& theAxisY,
+                           const QStringList& theAxisZ,
+                           const QStringList& theMinVals,
+                           const QStringList& theMaxVals,
+                           const QStringList& theSpeedVals,
+                           QDomDocument& theDocument)
+{
+    if (theDimensions.count() < 7) return false;
+    if (theAxisX.count() < DL_ROBOT_JOINT_COUNT ||
+        theAxisY.count() < DL_ROBOT_JOINT_COUNT ||
+        theAxisZ.count() < DL_ROBOT_JOINT_COUNT ||
+        theMinVals.count() < DL_ROBOT_JOINT_COUNT ||
+        theMaxVals.count() < DL_ROBOT_JOINT_COUNT ||
+        theSpeedVals.count() < DL_ROBOT_JOINT_COUNT)
+    {
+        return false;
+    }
+
+    if (!theDocument.setContent(QString::fromUtf8(ROBOT_XML_TEMPLATE))) return false;
+
+    QDomElement aModel = theDocument.documentElement().firstChildElement("model");
+    updateTextNode(theDocument, aModel, "manufacturer", theManufacturer);
+    updateTextNode(theDocument, aModel, "name", theModelName);
+
+    setFixedTranslation(theDocument, "fixed2", theDimensions[0], "0", theDimensions[1]);
+    setFixedTranslation(theDocument, "fixed3", "0", "0", theDimensions[2]);
+    setFixedTranslation(theDocument, "fixed4", "0", "0", theDimensions[3]);
+    setFixedTranslation(theDocument, "fixed5", theDimensions[4], "0", "0");
+    setFixedTranslation(theDocument, "fixed6", "0", theDimensions[5], "0");
+    if (theIsPose1)
+        setFixedTranslation(theDocument, "fixed7", theDimensions[6], "0", "0");
+    else
+        setFixedTranslation(theDocument, "fixed7", "0", "0", theDimensions[6]);
+
+    QDomNodeList aJointNodes = theDocument.elementsByTagName("revolute");
+    for (int i = 0; i < DL_ROBOT_JOINT_COUNT && i < aJointNodes.count(); ++i)
+    {
+        QDomElement aJoint = aJointNodes.at(i).toElement();
+        QDomElement anAxis = ensureChildElement(theDocument, aJoint, "axis");
+        updateTextNode(theDocument, anAxis, "x", theAxisX[i]);
+        updateTextNode(theDocument, anAxis, "y", theAxisY[i]);
+        updateTextNode(theDocument, anAxis, "z", theAxisZ[i]);
+        updateTextNode(theDocument, aJoint, "min", theMinVals[i]);
+        updateTextNode(theDocument, aJoint, "max", theMaxVals[i]);
+        updateTextNode(theDocument, aJoint, "speed", theSpeedVals[i]);
+    }
+
+    return true;
+}
+
+QString resolveHref(const QString& theBaseDir, const QString& theHref)
+{
+    if (theHref.isEmpty()) return QString();
+    return QFileInfo(QDir(theBaseDir).filePath(theHref)).absoluteFilePath();
+}
+
+bool saveXmlDocument(const QDomDocument& theDocument, const QString& theFileName, QString* theErrorMessage = nullptr)
+{
+    QFileInfo aFileInfo(theFileName);
+    if (!QDir().mkpath(aFileInfo.absolutePath()))
+    {
+        if (nullptr != theErrorMessage)
+            *theErrorMessage = QString("Can not create directory: %1").arg(aFileInfo.absolutePath());
+        return false;
+    }
+
+    QFile aFile(theFileName);
+    if (!aFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+    {
+        if (nullptr != theErrorMessage)
+            *theErrorMessage = QString("Can not write file: %1").arg(theFileName);
+        return false;
+    }
+
+    QTextStream aStream(&aFile);
+    aStream.setCodec("UTF-8");
+    aStream << theDocument.toString();
+    aFile.close();
+    return true;
+}
 }
 
 DL_RobotContext::DL_RobotContext(const Handle(AIS_InteractiveContext)& theContext)
@@ -59,6 +210,11 @@ DL_RobotContext::DL_RobotContext(const Handle(AIS_InteractiveContext)& theContex
   m_paramL3(0.0), m_paramD(0.0), m_paramW(0.0), m_isPose1(true)
 {
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i) { m_listJoints_angles[i] = 0.0; m_listJoints_angles0[i] = 0.0; }
+    for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
+    {
+        m_rodNames[i].clear();
+        m_rodFileNames[i].clear();
+    }
 }
 
 DL_RobotContext::~DL_RobotContext() {}
@@ -245,7 +401,9 @@ void DL_RobotContext::loadAISShapes()
 
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
     {
-        QString aStpPath = QDir(m_robotDirPath).filePath(QString("ROD_1_%1.stp").arg(i + 1));
+        QString aStpPath = m_rodFileNames[i];
+        if (aStpPath.isEmpty())
+            aStpPath = QDir(m_robotDirPath).filePath(QString("ROD_1_%1.stp").arg(i + 1));
         m_listRods[i] = loadStp(aStpPath.toLocal8Bit().constData());
         if (m_listRods[i].IsNull()) throw std::runtime_error(QString("load rod failed: %1").arg(aStpPath).toStdString());
     }
@@ -355,13 +513,15 @@ int DL_RobotContext::loadRobotDynamic(QWidget* theParent)
     QString aStartPath;
     if (!m_previewStepFileName.isEmpty())
         aStartPath = m_previewStepFileName;
+    else if (!m_topXmlFileName.isEmpty())
+        aStartPath = m_topXmlFileName;
     else
         aStartPath = m_robotXmlFileName.isEmpty() ? m_robotDirPath : m_robotXmlFileName;
     QString aFileName = QFileDialog::getOpenFileName(
         theParent,
-        "Choose robot XML or STEP file",
+        "Choose Top.xml or STEP file",
         aStartPath,
-        "Robot XML (*.xml);;STEP Files (*.stp *.step)");
+        "Top XML (*.xml);;STEP Files (*.stp *.step)");
     if (aFileName.isEmpty()) return 0;
 
     QFileInfo aInfo(aFileName);
@@ -376,23 +536,149 @@ int DL_RobotContext::loadRobotDynamic(QWidget* theParent)
         return previewStepFile(aFileName, theParent) ? -1 : 0;
     }
 
-    QMessageBox::warning(theParent, "Tips", "Please choose a robot XML file or a STEP file.");
+    QMessageBox::warning(theParent, "Tips", "Please choose a Top XML file or a STEP file.");
     return 0;
 }
 
 int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* theParent)
 {
+    if (m_context.IsNull()) return 0;
     if (theXmlFileName.isEmpty()) return 0;
 
     QFileInfo aInfo(theXmlFileName);
-    m_robotXmlFileName = aInfo.absoluteFilePath();
-    m_robotDirPath = aInfo.absolutePath();
+    QFile aTopFile(aInfo.absoluteFilePath());
+    if (!aTopFile.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(theParent, "Tips", QString("Can not open Top.xml:\n%1").arg(aInfo.absoluteFilePath()));
+        return 0;
+    }
 
-    QMessageBox::information(
-        theParent,
-        "Tips",
-        QString("XML entry loading is reserved and not implemented yet.\nSelected file:\n%1").arg(m_robotXmlFileName));
-    return -2;
+    QDomDocument aTopDocument;
+    if (!aTopDocument.setContent(&aTopFile))
+    {
+        aTopFile.close();
+        QMessageBox::warning(theParent, "Tips", "Top.xml parse failed.");
+        return 0;
+    }
+    aTopFile.close();
+
+    QDomElement aRoot = aTopDocument.documentElement();
+    if (aRoot.tagName() != "Top")
+    {
+        QMessageBox::warning(theParent, "Tips", "Please choose a valid Top.xml file.");
+        return 0;
+    }
+
+    m_topXmlFileName = aInfo.absoluteFilePath();
+    m_robotDirPath = aInfo.absolutePath();
+    m_previewStepFileName.clear();
+    for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
+    {
+        m_rodNames[i].clear();
+        m_rodFileNames[i].clear();
+    }
+
+    QDomElement anInfoElement = aRoot.firstChildElement("Info");
+    QString aManufacturer = anInfoElement.attribute("manufacturer", "Huashu");
+    QString aModelName = anInfoElement.attribute("model", "HSR-CR630-1750");
+
+    QString aMdlHref("robot.xml");
+    QDomElement aFilesElement = aRoot.firstChildElement("Files");
+    if (!aFilesElement.isNull())
+    {
+        QDomElement aMdlElement = aFilesElement.firstChildElement("Mdl");
+        if (!aMdlElement.isNull() && !aMdlElement.attribute("href").isEmpty())
+            aMdlHref = aMdlElement.attribute("href");
+    }
+    m_robotXmlFileName = resolveHref(m_robotDirPath, aMdlHref);
+
+    QDomElement aRodsElement = aRoot.firstChildElement("Rods");
+    for (QDomElement aRod = aRodsElement.firstChildElement("Rod"); !aRod.isNull(); aRod = aRod.nextSiblingElement("Rod"))
+    {
+        bool isOk = false;
+        int anIndex = aRod.attribute("index").toInt(&isOk);
+        if (!isOk || anIndex < 0 || anIndex > DL_ROBOT_JOINT_COUNT) continue;
+
+        m_rodNames[anIndex] = aRod.attribute("name", QString::fromLatin1(DEFAULT_ROD_NAMES[anIndex]));
+        QString aHref = aRod.attribute("href");
+        if (!aHref.isEmpty())
+            m_rodFileNames[anIndex] = resolveHref(m_robotDirPath, aHref);
+    }
+
+    QDomElement aKinematics = aRoot.firstChildElement("Kinematics");
+    QString aPose = aKinematics.attribute("pose", "case1").toLower();
+    bool isPose1 = ("case2" != aPose);
+    QDomElement aDimensionsElement = aKinematics.firstChildElement("Dimensions");
+    QStringList aDimensions;
+    aDimensions << aDimensionsElement.attribute("R", "0")
+                << aDimensionsElement.attribute("H", "0.278")
+                << aDimensionsElement.attribute("L2", "0.380")
+                << aDimensionsElement.attribute("S", "0")
+                << aDimensionsElement.attribute("L3", "0.370")
+                << aDimensionsElement.attribute("D", "-0.125")
+                << aDimensionsElement.attribute("W", "-0.135");
+
+    QStringList aAxisX;
+    QStringList aAxisY;
+    QStringList aAxisZ;
+    QStringList aMinVals;
+    QStringList aMaxVals;
+    QStringList aSpeedVals;
+    fillJointDefaults(isPose1, aAxisX, aAxisY, aAxisZ, aMinVals, aMaxVals, aSpeedVals);
+
+    for (QDomElement aJoint = aKinematics.firstChildElement("Joint"); !aJoint.isNull(); aJoint = aJoint.nextSiblingElement("Joint"))
+    {
+        bool isOk = false;
+        int anIndex = aJoint.attribute("index").toInt(&isOk);
+        if (!isOk || anIndex < 0 || anIndex >= DL_ROBOT_JOINT_COUNT) continue;
+
+        aAxisX[anIndex] = aJoint.attribute("axisX", aAxisX[anIndex]);
+        aAxisY[anIndex] = aJoint.attribute("axisY", aAxisY[anIndex]);
+        aAxisZ[anIndex] = aJoint.attribute("axisZ", aAxisZ[anIndex]);
+        aMinVals[anIndex] = aJoint.attribute("min", aMinVals[anIndex]);
+        aMaxVals[anIndex] = aJoint.attribute("max", aMaxVals[anIndex]);
+        aSpeedVals[anIndex] = aJoint.attribute("speed", aSpeedVals[anIndex]);
+    }
+
+    QDomDocument aRobotDocument;
+    if (!buildRobotMdlDocument(aManufacturer,
+                               aModelName,
+                               isPose1,
+                               aDimensions,
+                               aAxisX,
+                               aAxisY,
+                               aAxisZ,
+                               aMinVals,
+                               aMaxVals,
+                               aSpeedVals,
+                               aRobotDocument))
+    {
+        QMessageBox::warning(theParent, "Tips", "Can not build robot.xml from Top.xml.");
+        return 0;
+    }
+
+    QString anErrorMessage;
+    if (!saveXmlDocument(aRobotDocument, m_robotXmlFileName, &anErrorMessage))
+    {
+        QMessageBox::warning(theParent, "Tips", anErrorMessage);
+        return 0;
+    }
+    m_robotXmlDocument = aRobotDocument;
+
+    try
+    {
+        clearRobotPresentation();
+        loadAll();
+        if (!m_context.IsNull()) m_context->UpdateCurrentViewer();
+        return DL_ROBOT_JOINT_COUNT;
+    }
+    catch (const std::exception& e)
+    {
+        clearRobotPresentation();
+        std::printf("加载机器人失败: %s\n", e.what());
+        QMessageBox::warning(theParent, "Tips", QString("Load robot failed: %1").arg(e.what()));
+        return 0;
+    }
 }
 
 int DL_RobotContext::loadRobot(const QString& theDirPath, QWidget* theParent)
@@ -400,9 +686,15 @@ int DL_RobotContext::loadRobot(const QString& theDirPath, QWidget* theParent)
     if (m_context.IsNull()) return 0;
     if (theDirPath.isEmpty()) return 0;
 
+    m_topXmlFileName.clear();
     m_robotDirPath = theDirPath;
     m_robotXmlFileName = QDir(theDirPath).filePath("robot.xml");
     m_previewStepFileName.clear();
+    for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
+    {
+        m_rodNames[i].clear();
+        m_rodFileNames[i].clear();
+    }
     if (!loadRobotXml()) { std::printf("错误：缺失或无法解析 robot.xml 文件。\n"); QMessageBox::warning(theParent, "Tips", "robot.xml missing or invalid."); return 0; }
 
     try
@@ -426,6 +718,11 @@ bool DL_RobotContext::previewStepFile(const QString& theFileName, QWidget* thePa
     if (m_context.IsNull() || theFileName.isEmpty()) return false;
 
     clearRobotPresentation();
+    for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
+    {
+        m_rodNames[i].clear();
+        m_rodFileNames[i].clear();
+    }
 
     Handle(AIS_Shape) aPreviewShape = loadStp(theFileName.toLocal8Bit().constData());
     if (aPreviewShape.IsNull())
@@ -599,6 +896,19 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
     QGridLayout* aGrid = new QGridLayout();
     aGrid->setHorizontalSpacing(15);
     aGrid->setVerticalSpacing(10);
+    QLineEdit* aManufacturerEdit = new QLineEdit("Huashu");
+    QLineEdit* aModelEdit = new QLineEdit("HSR-CR630-1750");
+    aManufacturerEdit->setAlignment(Qt::AlignCenter);
+    aModelEdit->setAlignment(Qt::AlignCenter);
+    QLabel* aManufacturerLabel = new QLabel("Manufacturer");
+    QLabel* aModelLabel = new QLabel("Model");
+    aManufacturerLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    aModelLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    aGrid->addWidget(aManufacturerLabel, 0, 0);
+    aGrid->addWidget(aManufacturerEdit, 0, 1, 1, 6);
+    aGrid->addWidget(aModelLabel, 1, 0);
+    aGrid->addWidget(aModelEdit, 1, 1, 1, 6);
+
     QLineEdit* aParamEdits[7] = {nullptr};
     QStringList aParamLabels = QStringList() << "R" << "H" << "L2" << "S" << "L3" << "D" << "W";
     QStringList aParamDefaults = QStringList() << "0" << "0.278" << "0.380" << "0" << "0.370" << "-0.125" << "-0.135";
@@ -606,10 +916,10 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
     {
         QLabel* aLabel = new QLabel(aParamLabels[i]);
         aLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        aGrid->addWidget(aLabel, i, 0);
+        aGrid->addWidget(aLabel, i + 2, 0);
         aParamEdits[i] = new QLineEdit(aParamDefaults[i]);
         aParamEdits[i]->setAlignment(Qt::AlignCenter);
-        aGrid->addWidget(aParamEdits[i], i, 1);
+        aGrid->addWidget(aParamEdits[i], i + 2, 1);
     }
     aGrid->setColumnMinimumWidth(2, 20);
 
@@ -619,95 +929,148 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
     aMinTitle->setAlignment(Qt::AlignCenter);
     aMaxTitle->setAlignment(Qt::AlignCenter);
     aSpeedTitle->setAlignment(Qt::AlignCenter);
-    aGrid->addWidget(aMinTitle, 0, 4);
-    aGrid->addWidget(aMaxTitle, 0, 5);
-    aGrid->addWidget(aSpeedTitle, 0, 6);
+    aGrid->addWidget(aMinTitle, 2, 4);
+    aGrid->addWidget(aMaxTitle, 2, 5);
+    aGrid->addWidget(aSpeedTitle, 2, 6);
 
     QLineEdit* aMinEdits[DL_ROBOT_JOINT_COUNT] = {nullptr};
     QLineEdit* aMaxEdits[DL_ROBOT_JOINT_COUNT] = {nullptr};
     QLineEdit* aSpeedEdits[DL_ROBOT_JOINT_COUNT] = {nullptr};
+    QStringList aSpeedDefaults = QStringList() << "187" << "160" << "180" << "260" << "230" << "360";
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i)
     {
         QLabel* aJointLabel = new QLabel(QString("Joint %1:").arg(i));
         aJointLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        aGrid->addWidget(aJointLabel, i + 1, 3);
+        aGrid->addWidget(aJointLabel, i + 3, 3);
 
         aMinEdits[i] = new QLineEdit("-360");
         aMaxEdits[i] = new QLineEdit("360");
-        aSpeedEdits[i] = new QLineEdit("0");
+        aSpeedEdits[i] = new QLineEdit(aSpeedDefaults[i]);
         aMinEdits[i]->setAlignment(Qt::AlignCenter);
         aMaxEdits[i]->setAlignment(Qt::AlignCenter);
         aSpeedEdits[i]->setAlignment(Qt::AlignCenter);
-        aGrid->addWidget(aMinEdits[i], i + 1, 4);
-        aGrid->addWidget(aMaxEdits[i], i + 1, 5);
-        aGrid->addWidget(aSpeedEdits[i], i + 1, 6);
+        aGrid->addWidget(aMinEdits[i], i + 3, 4);
+        aGrid->addWidget(aMaxEdits[i], i + 3, 5);
+        aGrid->addWidget(aSpeedEdits[i], i + 3, 6);
     }
 
-    QPushButton* aCreateButton = new QPushButton("Create robot.xml");
-    aGrid->addWidget(aCreateButton, 8, 0, 1, 7);
+    QPushButton* aCreateButton = new QPushButton("Create Top.xml + robot.xml");
+    aGrid->addWidget(aCreateButton, 9, 0, 1, 7);
     aMainLayout->addLayout(aGrid);
 
     QObject::connect(aCreateButton, &QPushButton::clicked, [&]()
     {
-        QDomDocument aDocument;
-        if (!aDocument.setContent(QString::fromUtf8(ROBOT_XML_TEMPLATE))) return;
-
-        auto updateText = [&aDocument](QDomElement theParent, const QString& theTag, const QString& theValue)
-        {
-            QDomElement aNode = theParent.firstChildElement(theTag);
-            if (aNode.isNull()) { aNode = aDocument.createElement(theTag); theParent.appendChild(aNode); }
-            if (aNode.firstChild().isNull()) aNode.appendChild(aDocument.createTextNode(theValue));
-            else aNode.firstChild().setNodeValue(theValue);
-        };
-
-        auto setFixed = [&aDocument, &updateText](const QString& theId, const QString& theX, const QString& theY, const QString& theZ)
-        {
-            QDomNodeList aNodes = aDocument.elementsByTagName("fixed");
-            for (int i = 0; i < aNodes.count(); ++i)
-            {
-                QDomElement e = aNodes.at(i).toElement();
-                if (e.attribute("id") != theId) continue;
-                QDomElement t = e.firstChildElement("translation");
-                updateText(t, "x", theX); updateText(t, "y", theY); updateText(t, "z", theZ);
-                return;
-            }
-        };
-
-        setFixed("fixed2", aParamEdits[0]->text(), "0", aParamEdits[1]->text());
-        setFixed("fixed3", "0", "0", aParamEdits[2]->text());
-        setFixed("fixed4", "0", "0", aParamEdits[3]->text());
-        setFixed("fixed5", aParamEdits[4]->text(), "0", "0");
-        setFixed("fixed6", "0", aParamEdits[5]->text(), "0");
         bool isPose1 = aPose1Button->isChecked();
-        if (isPose1) setFixed("fixed7", aParamEdits[6]->text(), "0", "0");
-        else setFixed("fixed7", "0", "0", aParamEdits[6]->text());
-
-        QStringList aAxisX = QStringList() << "0" << "0" << "0" << "1" << "0" << "1";
-        QStringList aAxisY = QStringList() << "0" << "1" << "1" << "0" << "1" << "0";
-        QStringList aAxisZ = QStringList() << "1" << "0" << "0" << "0" << "0" << "0";
-        if (!isPose1) { aAxisX[5] = "0"; aAxisZ[5] = "1"; }
-
-        QDomNodeList aJointNodes = aDocument.elementsByTagName("revolute");
-        for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i)
-        {
-            QDomElement aJoint = aJointNodes.at(i).toElement();
-            QDomElement aAxis = aJoint.firstChildElement("axis");
-            updateText(aAxis, "x", aAxisX[i]); updateText(aAxis, "y", aAxisY[i]); updateText(aAxis, "z", aAxisZ[i]);
-            updateText(aJoint, "min", aMinEdits[i]->text());
-            updateText(aJoint, "max", aMaxEdits[i]->text());
-            updateText(aJoint, "speed", aSpeedEdits[i]->text());
-        }
-
         QString aSavePath = QFileDialog::getExistingDirectory(&aDialog, "Save to...");
         if (aSavePath.isEmpty()) return;
 
-        QFile aFile(QDir(aSavePath).filePath("robot.xml"));
-        if (!aFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) { QMessageBox::warning(&aDialog, "Tips", "robot.xml can not be written."); return; }
-        QTextStream aStream(&aFile);
-        aStream.setCodec("UTF-8");
-        aStream << aDocument.toString();
-        aFile.close();
-        QMessageBox::information(&aDialog, "Done", "robot.xml created!");
+        QStringList aDimensions;
+        for (int i = 0; i < aParamLabels.count(); ++i) aDimensions << aParamEdits[i]->text();
+
+        QStringList aAxisX;
+        QStringList aAxisY;
+        QStringList aAxisZ;
+        QStringList aMinVals;
+        QStringList aMaxVals;
+        QStringList aSpeedVals;
+        fillJointDefaults(isPose1, aAxisX, aAxisY, aAxisZ, aMinVals, aMaxVals, aSpeedVals);
+        for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i)
+        {
+            aMinVals[i] = aMinEdits[i]->text();
+            aMaxVals[i] = aMaxEdits[i]->text();
+            aSpeedVals[i] = aSpeedEdits[i]->text();
+        }
+
+        QDomDocument aRobotDocument;
+        if (!buildRobotMdlDocument(aManufacturerEdit->text(),
+                                   aModelEdit->text(),
+                                   isPose1,
+                                   aDimensions,
+                                   aAxisX,
+                                   aAxisY,
+                                   aAxisZ,
+                                   aMinVals,
+                                   aMaxVals,
+                                   aSpeedVals,
+                                   aRobotDocument))
+        {
+            QMessageBox::warning(&aDialog, "Tips", "robot.xml build failed.");
+            return;
+        }
+
+        QDomDocument aTopDocument;
+        QDomElement aTopRoot = aTopDocument.createElement("Top");
+        aTopRoot.setAttribute("version", "1.0");
+        aTopDocument.appendChild(aTopRoot);
+
+        QDomElement anInfo = aTopDocument.createElement("Info");
+        anInfo.setAttribute("manufacturer", aManufacturerEdit->text());
+        anInfo.setAttribute("model", aModelEdit->text());
+        anInfo.setAttribute("dof", QString::number(DL_ROBOT_JOINT_COUNT));
+        aTopRoot.appendChild(anInfo);
+
+        QDomElement aFiles = aTopDocument.createElement("Files");
+        QDomElement aMdl = aTopDocument.createElement("Mdl");
+        aMdl.setAttribute("href", "robot.xml");
+        aFiles.appendChild(aMdl);
+        QDomElement aSourceStep = aTopDocument.createElement("SourceStep");
+        aSourceStep.setAttribute("href", "");
+        aFiles.appendChild(aSourceStep);
+        aTopRoot.appendChild(aFiles);
+
+        QDomElement aRods = aTopDocument.createElement("Rods");
+        for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
+        {
+            QDomElement aRod = aTopDocument.createElement("Rod");
+            aRod.setAttribute("index", QString::number(i));
+            aRod.setAttribute("name", QString::fromLatin1(DEFAULT_ROD_NAMES[i]));
+            aRod.setAttribute("body", QString("body%1").arg(i));
+            aRod.setAttribute("href", QString("ROD_1_%1.stp").arg(i + 1));
+            aRods.appendChild(aRod);
+        }
+        aTopRoot.appendChild(aRods);
+
+        QDomElement aKinematics = aTopDocument.createElement("Kinematics");
+        aKinematics.setAttribute("unit", "m");
+        aKinematics.setAttribute("pose", isPose1 ? "case1" : "case2");
+        QDomElement aDimensionsElement = aTopDocument.createElement("Dimensions");
+        aDimensionsElement.setAttribute("R", aDimensions[0]);
+        aDimensionsElement.setAttribute("H", aDimensions[1]);
+        aDimensionsElement.setAttribute("L2", aDimensions[2]);
+        aDimensionsElement.setAttribute("S", aDimensions[3]);
+        aDimensionsElement.setAttribute("L3", aDimensions[4]);
+        aDimensionsElement.setAttribute("D", aDimensions[5]);
+        aDimensionsElement.setAttribute("W", aDimensions[6]);
+        aKinematics.appendChild(aDimensionsElement);
+
+        for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i)
+        {
+            QDomElement aJoint = aTopDocument.createElement("Joint");
+            aJoint.setAttribute("index", QString::number(i));
+            aJoint.setAttribute("name", QString("J%1").arg(i + 1));
+            aJoint.setAttribute("axisX", aAxisX[i]);
+            aJoint.setAttribute("axisY", aAxisY[i]);
+            aJoint.setAttribute("axisZ", aAxisZ[i]);
+            aJoint.setAttribute("min", aMinVals[i]);
+            aJoint.setAttribute("max", aMaxVals[i]);
+            aJoint.setAttribute("speed", aSpeedVals[i]);
+            aKinematics.appendChild(aJoint);
+        }
+        aTopRoot.appendChild(aKinematics);
+
+        QString anErrorMessage;
+        if (!saveXmlDocument(aRobotDocument, QDir(aSavePath).filePath("robot.xml"), &anErrorMessage))
+        {
+            QMessageBox::warning(&aDialog, "Tips", anErrorMessage);
+            return;
+        }
+        if (!saveXmlDocument(aTopDocument, QDir(aSavePath).filePath("Top.xml"), &anErrorMessage))
+        {
+            QMessageBox::warning(&aDialog, "Tips", anErrorMessage);
+            return;
+        }
+
+        QMessageBox::information(&aDialog, "Done", "Top.xml and robot.xml created!");
         aDialog.accept();
     });
 

@@ -40,9 +40,12 @@ private://两个库共用的数据
     double      m_listJoints_angles[DL_ROBOT_JOINT_COUNT];
     double      m_listJoints_angles0[DL_ROBOT_JOINT_COUNT];
     gp_Ax1      m_listJoints[DL_ROBOT_JOINT_COUNT];
+    QString     m_topXmlFileName;
     QString     m_robotXmlFileName;
     QString     m_robotDirPath;
     QString     m_previewStepFileName;
+    QString     m_rodNames[DL_ROBOT_JOINT_COUNT + 1];
+    QString     m_rodFileNames[DL_ROBOT_JOINT_COUNT + 1];
     QDomDocument m_robotXmlDocument;
 public:
     void          setPositions(const double* theAngles);
