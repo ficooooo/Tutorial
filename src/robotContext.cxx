@@ -51,12 +51,15 @@
 
 namespace
 {
+// RL 运动学模板仍然作为运行时底座存在，Top.xml 只是更上层的入口描述。
 static const char* ROBOT_XML_TEMPLATE = R"(<?xml version="1.0" encoding="UTF-8"?><rlmdl xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="rlmdl.xsd"><model><manufacturer>Huashu</manufacturer><name>HSR-CR630-1750</name><world id="world"><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation><g><x>0</x><y>0</y><z>9.86055</z></g></world><body id="body0"><ignore/><ignore idref="body1"/></body><frame id="frame0"/><frame id="frame1"/><body id="body1"><ignore idref="body0"/><ignore idref="body2"/></body><frame id="frame2"/><body id="body2"><ignore idref="body1"/><ignore idref="body3"/><ignore idref="body4"/></body><frame id="frame3"/><body id="body3"><ignore idref="body2"/><ignore idref="body4"/></body><frame id="frame4"/><body id="body4"><ignore idref="body2"/><ignore idref="body3"/><ignore idref="body5"/><ignore idref="body6"/></body><frame id="frame5"/><body id="body5"><ignore idref="body4"/><ignore idref="body6"/></body><frame id="frame6"/><body id="body6"><ignore idref="body4"/><ignore idref="body5"/></body><frame id="frame7"/><fixed id="fixed0"><frame><a idref="world"/><b idref="body0"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed><fixed id="fixed1"><frame><a idref="body0"/><b idref="frame0"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed><revolute id="joint0"><frame><a idref="frame0"/><b idref="frame1"/></frame><axis><x>0</x><y>0</y><z>1</z></axis><max>360</max><min>-360</min><speed>187</speed></revolute><fixed id="fixed2"><frame><a idref="frame1"/><b idref="body1"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0.5015</z></translation></fixed><revolute id="joint1"><frame><a idref="body1"/><b idref="frame2"/></frame><axis><x>0</x><y>1</y><z>0</z></axis><max>360</max><min>-360</min><speed>160</speed></revolute><fixed id="fixed3"><frame><a idref="frame2"/><b idref="body2"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0.950</z></translation></fixed><revolute id="joint2"><frame><a idref="body2"/><b idref="frame3"/></frame><axis><x>0</x><y>1</y><z>0</z></axis><max>360</max><min>-360</min><speed>180</speed></revolute><fixed id="fixed4"><frame><a idref="frame3"/><b idref="body3"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed><revolute id="joint3"><frame><a idref="body3"/><b idref="frame4"/></frame><axis><x>1</x><y>0</y><z>0</z></axis><max>360</max><min>-360</min><speed>260</speed></revolute><fixed id="fixed5"><frame><a idref="frame4"/><b idref="body4"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0.615</x><y>0</y><z>0</z></translation></fixed><revolute id="joint4"><frame><a idref="body4"/><b idref="frame5"/></frame><axis><x>0</x><y>1</y><z>0</z></axis><max>360</max><min>-360</min><speed>230</speed></revolute><fixed id="fixed6"><frame><a idref="frame5"/><b idref="body5"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>-0.177</y><z>-0.185</z></translation></fixed><revolute id="joint5"><frame><a idref="body5"/><b idref="frame6"/></frame><axis><x>0</x><y>0</y><z>1</z></axis><max>360</max><min>-360</min><speed>360</speed></revolute><fixed id="fixed7"><frame><a idref="frame6"/><b idref="body6"/></frame><rotation><x>0</x><y>0</y><z>1</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed><fixed id="fixed8"><frame><a idref="body6"/><b idref="frame7"/></frame><rotation><x>0</x><y>0</y><z>0</z></rotation><translation><x>0</x><y>0</y><z>0</z></translation></fixed></model></rlmdl>)";
+// 当 Top.xml 未显式提供杆件名称时，使用这组默认名称填充。
 static const char* DEFAULT_ROD_NAMES[DL_ROBOT_JOINT_COUNT + 1] =
 {
     "Base", "Shoulder", "UpperArm", "ForeArm", "Wrist1", "Wrist2", "Flange"
 };
 
+// 获取或补建子节点，避免 XML 写入阶段重复判断节点是否存在。
 QDomElement ensureChildElement(QDomDocument& theDocument, QDomElement theParent, const QString& theTag)
 {
     QDomElement aNode = theParent.firstChildElement(theTag);
@@ -68,6 +71,7 @@ QDomElement ensureChildElement(QDomDocument& theDocument, QDomElement theParent,
     return aNode;
 }
 
+// 统一更新文本节点内容，供 Top.xml -> robot.xml 映射过程复用。
 void updateTextNode(QDomDocument& theDocument, QDomElement theParent, const QString& theTag, const QString& theValue)
 {
     QDomElement aNode = ensureChildElement(theDocument, theParent, theTag);
@@ -77,6 +81,7 @@ void updateTextNode(QDomDocument& theDocument, QDomElement theParent, const QStr
         aNode.firstChild().setNodeValue(theValue);
 }
 
+// 按固定关节 id 回写 translation，保持与既有 RL 模板结构一致。
 void setFixedTranslation(QDomDocument& theDocument,
                          const QString& theId,
                          const QString& theX,
@@ -96,6 +101,7 @@ void setFixedTranslation(QDomDocument& theDocument,
     }
 }
 
+// 按两种手腕姿态给出默认轴向、限位和速度，后续允许被 Top.xml 或 UI 输入覆盖。
 void fillJointDefaults(bool theIsPose1,
                        QStringList& theAxisX,
                        QStringList& theAxisY,
@@ -118,6 +124,7 @@ void fillJointDefaults(bool theIsPose1,
     theSpeedVals = QStringList() << "187" << "160" << "180" << "260" << "230" << "360";
 }
 
+// 将 Top.xml 中的关键参数映射回 RL 运行时 robot.xml，尽量复用现有运动学链路。
 bool buildRobotMdlDocument(const QString& theManufacturer,
                            const QString& theModelName,
                            const bool     theIsPose1,
@@ -173,12 +180,14 @@ bool buildRobotMdlDocument(const QString& theManufacturer,
     return true;
 }
 
+// 统一将 Top.xml 中的相对 href 解析为绝对路径。
 QString resolveHref(const QString& theBaseDir, const QString& theHref)
 {
     if (theHref.isEmpty()) return QString();
     return QFileInfo(QDir(theBaseDir).filePath(theHref)).absoluteFilePath();
 }
 
+// 保存 XML 文档时同时负责目录存在性检查。
 bool saveXmlDocument(const QDomDocument& theDocument, const QString& theFileName, QString* theErrorMessage = nullptr)
 {
     QFileInfo aFileInfo(theFileName);
@@ -372,6 +381,7 @@ void DL_RobotContext::clearRobotPresentation()
         if (!m_traceLine.IsNull()) m_context->Remove(m_traceLine, Standard_False);
     }
 
+    // 这里既清 OCC 显示，也清当前装载状态；但不主动清空入口 XML 路径，便于下次继续从同目录打开。
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i) m_listRods[i].Nullify();
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i) m_listJoints_angles[i] = 0.0;
     m_previewStepFileName.clear();
@@ -399,6 +409,7 @@ void DL_RobotContext::loadAISShapes()
 {
     if (m_robotXmlDocument.isNull()) throw std::runtime_error("robot.xml not loaded");
 
+    // 优先按 Top.xml 中声明的 href 加载几何；缺省时回退到旧的固定命名规则。
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
     {
         QString aStpPath = m_rodFileNames[i];
@@ -452,6 +463,7 @@ void DL_RobotContext::loadAISShapes()
 
 void DL_RobotContext::loadAll()
 {
+    // 统一走“RL 模型 + OCC 装配 + 初始姿态”三步，避免多入口重复写初始化代码。
     loadMdlModel(m_robotXmlFileName.toLocal8Bit().constData());
     loadAISShapes();
     resetRobot();
@@ -460,6 +472,7 @@ void DL_RobotContext::loadAll()
 void DL_RobotContext::forwardRobot()
 {
     if (!isLoaded()) return;
+    // 同一组关节角同时驱动 OCC 装配层级和 RL 正解模型，保证显示与计算一致。
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i)
     {
         gp_Trsf aTransform;
@@ -528,11 +541,13 @@ int DL_RobotContext::loadRobotDynamic(QWidget* theParent)
     QString aSuffix = aInfo.suffix().toLower();
     if ("xml" == aSuffix)
     {
+        // xml 入口专用于 Top.xml 主描述文件。
         return loadRobotFromXml(aFileName, theParent);
     }
 
     if ("stp" == aSuffix || "step" == aSuffix)
     {
+        // stp 入口保留为拆分前总装预览，不进入运动学装载。
         return previewStepFile(aFileName, theParent) ? -1 : 0;
     }
 
@@ -578,6 +593,7 @@ int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* th
         m_rodFileNames[i].clear();
     }
 
+    // Top.xml 负责描述厂商、模型、杆件资源与关键运动学参数。
     QDomElement anInfoElement = aRoot.firstChildElement("Info");
     QString aManufacturer = anInfoElement.attribute("manufacturer", "Huashu");
     QString aModelName = anInfoElement.attribute("model", "HSR-CR630-1750");
@@ -592,6 +608,7 @@ int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* th
     }
     m_robotXmlFileName = resolveHref(m_robotDirPath, aMdlHref);
 
+    // Rod 列表只决定几何资源与命名；真正的关节关系仍交给 RL robot.xml。
     QDomElement aRodsElement = aRoot.firstChildElement("Rods");
     for (QDomElement aRod = aRodsElement.firstChildElement("Rod"); !aRod.isNull(); aRod = aRod.nextSiblingElement("Rod"))
     {
@@ -605,6 +622,7 @@ int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* th
             m_rodFileNames[anIndex] = resolveHref(m_robotDirPath, aHref);
     }
 
+    // Kinematics 是 Top.xml 中对 RL 模板最关键的一层映射来源。
     QDomElement aKinematics = aRoot.firstChildElement("Kinematics");
     QString aPose = aKinematics.attribute("pose", "case1").toLower();
     bool isPose1 = ("case2" != aPose);
@@ -640,6 +658,7 @@ int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* th
         aSpeedVals[anIndex] = aJoint.attribute("speed", aSpeedVals[anIndex]);
     }
 
+    // 先构建运行时 robot.xml，再复用既有的 loadAll() 主链，避免改动扩散到后续计算逻辑。
     QDomDocument aRobotDocument;
     if (!buildRobotMdlDocument(aManufacturer,
                                aModelName,
@@ -717,6 +736,7 @@ bool DL_RobotContext::previewStepFile(const QString& theFileName, QWidget* thePa
 {
     if (m_context.IsNull() || theFileName.isEmpty()) return false;
 
+    // 单 STEP 预览故意不初始化 RL 模型，只保留几何查看与后续拆分入口。
     clearRobotPresentation();
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
     {
@@ -752,6 +772,7 @@ void DL_RobotContext::calcRobot()
     if (!isLoaded() || m_endTrihedron.IsNull()) return;
     std::size_t dof = m_rl_mdl_KinematicModel->getDof();
 
+    // 这里主要用于验证“当前显示姿态”与“RL 正逆解结果”是否保持一致。
     std::cout << "================ 关节限位（单位：度） ================" << std::endl;
     for (std::size_t i = 0; i < dof; ++i)
     {
@@ -813,6 +834,7 @@ bool DL_RobotContext::splitStepFile(const QString& theFileName)
     if (aReader.ReadFile(aFileName.toLocal8Bit().constData()) != IFSelect_RetDone) { std::printf("读取失败\n"); return false; }
     aReader.TransferRoots();
 
+    // 保持原有拆分策略：按 STEP 顶层 root 的直接子件拆分，并继续使用爆炸视图显示结果。
     TopoDS_Compound aWholeCompound;
     BRep_Builder aBuilder;
     aBuilder.MakeCompound(aWholeCompound);
@@ -960,6 +982,7 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
 
     QObject::connect(aCreateButton, &QPushButton::clicked, [&]()
     {
+        // 表单只维护一份输入，再同时输出 Top.xml 与 robot.xml，避免两份配置手工同步。
         bool isPose1 = aPose1Button->isChecked();
         QString aSavePath = QFileDialog::getExistingDirectory(&aDialog, "Save to...");
         if (aSavePath.isEmpty()) return;
@@ -1018,6 +1041,7 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
         aFiles.appendChild(aSourceStep);
         aTopRoot.appendChild(aFiles);
 
+        // 当前 UI 没有单独编辑杆件名称与 href，因此先按既有固定命名写出默认资源清单。
         QDomElement aRods = aTopDocument.createElement("Rods");
         for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
         {
