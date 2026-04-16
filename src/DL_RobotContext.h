@@ -70,7 +70,7 @@ public:
     //按 1-based 索引读取单个关节角。
     double        getPosition(int theJointIndex) const;
 //--------------------------------------------------------------------------------------------
-private://OCC显示数据  实现参考 robot.cxx
+private://OCC显示数据  实现参考 robotcontext.cxx
     //7 个杆件显示对象，通过 AddChild 形成装配层级。
     Handle(AIS_Shape) m_listRods[DL_ROBOT_JOINT_COUNT + 1];
     // 从世界原点到当前末端位置的辅助轨迹线。
