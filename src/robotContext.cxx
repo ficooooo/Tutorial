@@ -212,6 +212,38 @@ bool saveXmlDocument(const QDomDocument& theDocument, const QString& theFileName
     aFile.close();
     return true;
 }
+
+// 以法兰局部坐标系为基准，根据 x/y/z(mm 或 m) 与 Rx/Ry/Rz(°) 生成 4x4 刚体变换。
+gp_Trsf buildTcpPoseTransform(const double theX,
+                             const double theY,
+                             const double theZ,
+                             const double theRxDeg,
+                             const double theRyDeg,
+                             const double theRzDeg)
+{
+    const gp_Pnt anOrigin(0.0, 0.0, 0.0);
+    gp_Trsf aTranslation;
+    aTranslation.SetTranslation(gp_Vec(theX, theY, theZ));
+
+    gp_Trsf aRotX;
+    if (std::abs(theRxDeg) > 0.000001)
+        aRotX.SetRotation(gp_Ax1(anOrigin, gp_Dir(1.0, 0.0, 0.0)), theRxDeg * rl::math::DEG2RAD);
+
+    gp_Trsf aRotY;
+    if (std::abs(theRyDeg) > 0.000001)
+        aRotY.SetRotation(gp_Ax1(anOrigin, gp_Dir(0.0, 1.0, 0.0)), theRyDeg * rl::math::DEG2RAD);
+
+    gp_Trsf aRotZ;
+    if (std::abs(theRzDeg) > 0.000001)
+        aRotZ.SetRotation(gp_Ax1(anOrigin, gp_Dir(0.0, 0.0, 1.0)), theRzDeg * rl::math::DEG2RAD);
+
+    // 统一采用“先平移，再按 X->Y->Z 输入顺序叠加旋转”的约定。
+    gp_Trsf aTransform = aTranslation;
+    aTransform.Multiply(aRotZ);
+    aTransform.Multiply(aRotY);
+    aTransform.Multiply(aRotX);
+    return aTransform;
+}
 }
 
 DL_RobotContext::DL_RobotContext(const Handle(AIS_InteractiveContext)& theContext)
@@ -224,6 +256,11 @@ DL_RobotContext::DL_RobotContext(const Handle(AIS_InteractiveContext)& theContex
         m_rodNames[i].clear();
         m_rodFileNames[i].clear();
     }
+    m_toolFileName.clear();
+    m_isToolEnabled = false;
+    m_tfTCPDisplay = gp_Trsf();
+    m_tfTCP = gp_Trsf();
+    m_tfTCPInv = gp_Trsf();
 }
 
 DL_RobotContext::~DL_RobotContext() {}
@@ -257,7 +294,6 @@ void DL_RobotContext::setTcp(const gp_Trsf& theTransform)
 {
     m_tfTCP = theTransform;
     m_tfTCPInv = theTransform.Inverted();
-    if (!m_ASTool.IsNull()) m_ASTool->SetLocalTransformation(m_tfTCP);
 }
 
 rl::math::Transform DL_RobotContext::trans(const gp_Trsf& theTransform) const
@@ -385,6 +421,7 @@ void DL_RobotContext::clearRobotPresentation()
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i) m_listRods[i].Nullify();
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i) m_listJoints_angles[i] = 0.0;
     m_previewStepFileName.clear();
+    m_ASTool.Nullify();
     m_traceLine.Nullify();
     m_endTrihedron.Nullify();
     m_rl_mdl_IKSolver.reset();
@@ -445,19 +482,32 @@ void DL_RobotContext::loadAISShapes()
     if (m_isPose1) m_listJoints[5] = gp_Ax1(gp_Pnt(0.0, m_paramD, m_paramH + m_paramL2 + m_paramS), getJointDir(5));
     else m_listJoints[5] = gp_Ax1(gp_Pnt(m_paramR + m_paramL3, m_paramD, 0.0), getJointDir(5));
 
-    gp_Pnt aTcpPoint;
-    if (m_isPose1) aTcpPoint.SetCoord(m_paramR + m_paramL3 + m_paramW, m_paramD, m_paramH + m_paramL2 + m_paramS);
-    else aTcpPoint.SetCoord(m_paramR + m_paramL3, m_paramD, m_paramH + m_paramL2 + m_paramS + m_paramW);
-    Handle(AIS_Trihedron) aTrihedron = createEndTrihedron(aTcpPoint, gp_Dir(0.0, 0.0, 1.0), gp_Dir(1.0, 0.0, 0.0));
-    m_listRods[DL_ROBOT_JOINT_COUNT]->AddChild(aTrihedron);
+    const bool hasToolFile = m_isToolEnabled && !m_toolFileName.isEmpty() && QFileInfo::exists(m_toolFileName);
+    gp_Pnt aFlangePoint;
+    if (m_isPose1) aFlangePoint.SetCoord(m_paramR + m_paramL3 + m_paramW, m_paramD, m_paramH + m_paramL2 + m_paramS);
+    else aFlangePoint.SetCoord(m_paramR + m_paramL3, m_paramD, m_paramH + m_paramL2 + m_paramS + m_paramW);
+
+    gp_Pnt aTriPoint = aFlangePoint;
+    gp_Dir aTriNormal(0.0, 0.0, 1.0);
+    gp_Dir aTriXAxis(1.0, 0.0, 0.0);
+    if (hasToolFile)
+    {
+        const gp_Pnt aTcpOffset = gp_Pnt(0.0, 0.0, 0.0).Transformed(m_tfTCPDisplay);
+        aTriPoint.Translate(gp_Vec(aTcpOffset.X(), aTcpOffset.Y(), aTcpOffset.Z()));
+        aTriNormal.Transform(m_tfTCPDisplay);
+        aTriXAxis.Transform(m_tfTCPDisplay);
+    }
+
+    Handle(AIS_Trihedron) aTrihedron = createEndTrihedron(aTriPoint, aTriNormal, aTriXAxis);
+    m_listRods[DL_ROBOT_JOINT_COUNT]->AddChildWithCurrentTransformation(aTrihedron);
     m_context->Display(aTrihedron, Standard_False);
 
-    if (!m_ASTool.IsNull())
+    if (hasToolFile)
     {
-        m_ASTool->SetLocalTransformation(m_tfTCP);
-        m_listRods[DL_ROBOT_JOINT_COUNT]->AddChild(m_ASTool);
-        m_context->SetDisplayMode(m_ASTool, 1, Standard_False);
-        m_context->Display(m_ASTool, Standard_False);
+        gp_Trsf aToolDisplayTransform;
+        aToolDisplayTransform.SetTranslation(gp_Vec(aFlangePoint.X(), aFlangePoint.Y(), aFlangePoint.Z()));
+        // 约定焊枪模型原点就在安装中心，因此工具模型仅需先落到原始法兰末端位置。
+        loadTool(m_toolFileName.toLocal8Bit().constData(), aToolDisplayTransform);
     }
 }
 
@@ -485,7 +535,6 @@ void DL_RobotContext::forwardRobot()
     for (std::size_t i = 0; i < dof; ++i) q(i) = m_listJoints_angles[i];
     m_rl_mdl_KinematicModel->setPosition(q);
     m_rl_mdl_KinematicModel->forwardPosition();
-    if (!m_ASTool.IsNull()) m_ASTool->SetLocalTransformation(m_tfTCP);
     updateTraceLine();
 }
 
@@ -599,14 +648,41 @@ int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* th
     QString aModelName = anInfoElement.attribute("model", "HSR-CR630-1750");
 
     QString aMdlHref("robot.xml");
+    QString aToolHref;
     QDomElement aFilesElement = aRoot.firstChildElement("Files");
     if (!aFilesElement.isNull())
     {
         QDomElement aMdlElement = aFilesElement.firstChildElement("Mdl");
         if (!aMdlElement.isNull() && !aMdlElement.attribute("href").isEmpty())
             aMdlHref = aMdlElement.attribute("href");
+
+        QDomElement aToolElement = aFilesElement.firstChildElement("Tool");
+        if (!aToolElement.isNull() && !aToolElement.attribute("href").isEmpty())
+            aToolHref = aToolElement.attribute("href");
     }
     m_robotXmlFileName = resolveHref(m_robotDirPath, aMdlHref);
+
+    bool aToolEnabled = false;
+    gp_Trsf aTcpDisplayTransform;
+    gp_Trsf aTcpModelTransform;
+    QDomElement aToolConfig = aRoot.firstChildElement("Tool");
+    if (!aToolConfig.isNull())
+    {
+        aToolEnabled = ("false" != aToolConfig.attribute("enabled", "true").toLower());
+        QDomElement aTcpElement = aToolConfig.firstChildElement("Tcp");
+        const double aTcpX = aTcpElement.attribute("x", "0").toDouble();
+        const double aTcpY = aTcpElement.attribute("y", "0").toDouble();
+        const double aTcpZ = aTcpElement.attribute("z", "0").toDouble();
+        const double aTcpRx = aTcpElement.attribute("rx", "0").toDouble();
+        const double aTcpRy = aTcpElement.attribute("ry", "0").toDouble();
+        const double aTcpRz = aTcpElement.attribute("rz", "0").toDouble();
+        aTcpDisplayTransform = buildTcpPoseTransform(aTcpX, aTcpY, aTcpZ, aTcpRx, aTcpRy, aTcpRz);
+        aTcpModelTransform = buildTcpPoseTransform(aTcpX / 1000.0, aTcpY / 1000.0, aTcpZ / 1000.0, aTcpRx, aTcpRy, aTcpRz);
+    }
+    else if (!aToolHref.isEmpty())
+    {
+        aToolEnabled = true;
+    }
 
     // Rod 列表只决定几何资源与命名；真正的关节关系仍交给 RL robot.xml。
     QDomElement aRodsElement = aRoot.firstChildElement("Rods");
@@ -687,6 +763,12 @@ int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* th
     try
     {
         clearRobotPresentation();
+        const QString aResolvedToolFile = resolveHref(m_robotDirPath, aToolHref);
+        const bool hasUsableTool = aToolEnabled && !aResolvedToolFile.isEmpty() && QFileInfo::exists(aResolvedToolFile);
+        m_toolFileName = hasUsableTool ? aResolvedToolFile : QString();
+        m_isToolEnabled = hasUsableTool;
+        m_tfTCPDisplay = hasUsableTool ? aTcpDisplayTransform : gp_Trsf();
+        setTcp(hasUsableTool ? aTcpModelTransform : gp_Trsf());
         loadAll();
         if (!m_context.IsNull()) m_context->UpdateCurrentViewer();
         return DL_ROBOT_JOINT_COUNT;
@@ -709,6 +791,10 @@ int DL_RobotContext::loadRobot(const QString& theDirPath, QWidget* theParent)
     m_robotDirPath = theDirPath;
     m_robotXmlFileName = QDir(theDirPath).filePath("robot.xml");
     m_previewStepFileName.clear();
+    m_toolFileName.clear();
+    m_isToolEnabled = false;
+    m_tfTCPDisplay = gp_Trsf();
+    setTcp(gp_Trsf());
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
     {
         m_rodNames[i].clear();
@@ -738,6 +824,10 @@ bool DL_RobotContext::previewStepFile(const QString& theFileName, QWidget* thePa
 
     // 单 STEP 预览故意不初始化 RL 模型，只保留几何查看与后续拆分入口。
     clearRobotPresentation();
+    m_toolFileName.clear();
+    m_isToolEnabled = false;
+    m_tfTCPDisplay = gp_Trsf();
+    setTcp(gp_Trsf());
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
     {
         m_rodNames[i].clear();
@@ -783,9 +873,8 @@ void DL_RobotContext::calcRobot()
 
     rl::math::Vector q(dof), q0(dof), qinv(dof);
     for (std::size_t i = 0; i < dof; ++i) { q(i) = m_listJoints_angles[i]; q0(i) = m_listJoints_angles0[i]; }
-    m_rl_mdl_KinematicModel->setPosition(q);
-    m_rl_mdl_KinematicModel->forwardPosition();
-    rl::math::Transform t = m_rl_mdl_KinematicModel->getOperationalPosition(0);
+    const bool isUsingToolTcp = !m_ASTool.IsNull();
+    rl::math::Transform t = forwardSolve(m_listJoints_angles, isUsingToolTcp);
     std::cout << "rl依据xml计算末端坐标 (X,Y,Z): " << t.translation().x() << ", " << t.translation().y() << ", " << t.translation().z() << std::endl;
 
     gp_Pnt aWorldPoint = m_endTrihedron->Component()->Location().Transformed(m_endTrihedron->Transformation());
@@ -795,13 +884,13 @@ void DL_RobotContext::calcRobot()
     m_rl_mdl_KinematicModel->forwardPosition();
 
     double aAngles[DL_ROBOT_JOINT_COUNT] = {0.0};
-    if (!ikSolve(t, aAngles)) { std::printf("错误：逆解计算失败，无法到达目标位姿。\n"); return; }
+    if (!ikSolve(t, aAngles, isUsingToolTcp)) { std::printf("错误：逆解计算失败，无法到达目标位姿。\n"); return; }
 
     for (std::size_t i = 0; i < dof; ++i) { m_listJoints_angles[i] = aAngles[i]; qinv(i) = aAngles[i]; }
     forwardRobot();
     if (!m_context.IsNull()) m_context->UpdateCurrentViewer();
 
-    rl::math::Transform tinv = m_rl_mdl_KinematicModel->getOperationalPosition(0);
+    rl::math::Transform tinv = forwardSolve(m_listJoints_angles, isUsingToolTcp);
     std::cout << "================ 正逆解一致性验证 ================" << std::endl;
     std::cout << "初始目标关节角 (q):    " << q.transpose() << std::endl;
     std::cout << "逆解计算关节角 (qinv): " << qinv.transpose() << std::endl;
@@ -874,15 +963,16 @@ bool DL_RobotContext::splitStepFile(const QString& theFileName)
     return true;
 }
 
-void DL_RobotContext::loadTool(const char* modelFileName)
+void DL_RobotContext::loadTool(const char* modelFileName, const gp_Trsf& theDisplayTransform)
 {
     if (!modelFileName) return;
     QString aFileName = QString::fromLocal8Bit(modelFileName);
+    if (!QFileInfo::exists(aFileName)) return;
     QString aSuffix = QFileInfo(aFileName).suffix().toLower();
     m_ASTool = ("igs" == aSuffix || "iges" == aSuffix) ? loadIges(modelFileName) : loadStp(modelFileName);
     if (m_ASTool.IsNull()) return;
-    m_ASTool->SetLocalTransformation(m_tfTCP);
-    if (!m_listRods[DL_ROBOT_JOINT_COUNT].IsNull()) m_listRods[DL_ROBOT_JOINT_COUNT]->AddChild(m_ASTool);
+    m_ASTool->SetLocalTransformation(theDisplayTransform);
+    if (!m_listRods[DL_ROBOT_JOINT_COUNT].IsNull()) m_listRods[DL_ROBOT_JOINT_COUNT]->AddChildWithCurrentTransformation(m_ASTool);
     if (!m_context.IsNull()) { m_context->SetDisplayMode(m_ASTool, 1, Standard_False); m_context->Display(m_ASTool, Standard_False); m_context->UpdateCurrentViewer(); }
 }
 
@@ -931,6 +1021,21 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
     aGrid->addWidget(aModelLabel, 1, 0);
     aGrid->addWidget(aModelEdit, 1, 1, 1, 6);
 
+    QLineEdit* aTcpEdits[6] = {nullptr};
+    QStringList aTcpLabels = QStringList() << "Tcp X(mm)" << "Tcp Y(mm)" << "Tcp Z(mm)"
+                                           << "Tcp Rx(°)" << "Tcp Ry(°)" << "Tcp Rz(°)";
+    for (int i = 0; i < 6; ++i)
+    {
+        const int aRow = 2 + i / 3;
+        const int aColumn = (i % 3) * 2;
+        QLabel* aTcpLabel = new QLabel(aTcpLabels[i]);
+        aTcpLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        aGrid->addWidget(aTcpLabel, aRow, aColumn);
+        aTcpEdits[i] = new QLineEdit("0");
+        aTcpEdits[i]->setAlignment(Qt::AlignCenter);
+        aGrid->addWidget(aTcpEdits[i], aRow, aColumn + 1);
+    }
+
     QLineEdit* aParamEdits[7] = {nullptr};
     QStringList aParamLabels = QStringList() << "R" << "H" << "L2" << "S" << "L3" << "D" << "W";
     QStringList aParamDefaults = QStringList() << "0" << "0.278" << "0.380" << "0" << "0.370" << "-0.125" << "-0.135";
@@ -938,10 +1043,10 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
     {
         QLabel* aLabel = new QLabel(aParamLabels[i]);
         aLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        aGrid->addWidget(aLabel, i + 2, 0);
+        aGrid->addWidget(aLabel, i + 4, 0);
         aParamEdits[i] = new QLineEdit(aParamDefaults[i]);
         aParamEdits[i]->setAlignment(Qt::AlignCenter);
-        aGrid->addWidget(aParamEdits[i], i + 2, 1);
+        aGrid->addWidget(aParamEdits[i], i + 4, 1);
     }
     aGrid->setColumnMinimumWidth(2, 20);
 
@@ -951,9 +1056,9 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
     aMinTitle->setAlignment(Qt::AlignCenter);
     aMaxTitle->setAlignment(Qt::AlignCenter);
     aSpeedTitle->setAlignment(Qt::AlignCenter);
-    aGrid->addWidget(aMinTitle, 2, 4);
-    aGrid->addWidget(aMaxTitle, 2, 5);
-    aGrid->addWidget(aSpeedTitle, 2, 6);
+    aGrid->addWidget(aMinTitle, 4, 4);
+    aGrid->addWidget(aMaxTitle, 4, 5);
+    aGrid->addWidget(aSpeedTitle, 4, 6);
 
     QLineEdit* aMinEdits[DL_ROBOT_JOINT_COUNT] = {nullptr};
     QLineEdit* aMaxEdits[DL_ROBOT_JOINT_COUNT] = {nullptr};
@@ -963,7 +1068,7 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
     {
         QLabel* aJointLabel = new QLabel(QString("Joint %1:").arg(i));
         aJointLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        aGrid->addWidget(aJointLabel, i + 3, 3);
+        aGrid->addWidget(aJointLabel, i + 5, 3);
 
         aMinEdits[i] = new QLineEdit("-360");
         aMaxEdits[i] = new QLineEdit("360");
@@ -971,13 +1076,13 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
         aMinEdits[i]->setAlignment(Qt::AlignCenter);
         aMaxEdits[i]->setAlignment(Qt::AlignCenter);
         aSpeedEdits[i]->setAlignment(Qt::AlignCenter);
-        aGrid->addWidget(aMinEdits[i], i + 3, 4);
-        aGrid->addWidget(aMaxEdits[i], i + 3, 5);
-        aGrid->addWidget(aSpeedEdits[i], i + 3, 6);
+        aGrid->addWidget(aMinEdits[i], i + 5, 4);
+        aGrid->addWidget(aMaxEdits[i], i + 5, 5);
+        aGrid->addWidget(aSpeedEdits[i], i + 5, 6);
     }
 
     QPushButton* aCreateButton = new QPushButton("Create Top.xml + robot.xml");
-    aGrid->addWidget(aCreateButton, 9, 0, 1, 7);
+    aGrid->addWidget(aCreateButton, 11, 0, 1, 7);
     aMainLayout->addLayout(aGrid);
 
     QObject::connect(aCreateButton, &QPushButton::clicked, [&]()
@@ -989,6 +1094,8 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
 
         QStringList aDimensions;
         for (int i = 0; i < aParamLabels.count(); ++i) aDimensions << aParamEdits[i]->text();
+        QStringList aTcpValues;
+        for (int i = 0; i < 6; ++i) aTcpValues << aTcpEdits[i]->text();
 
         QStringList aAxisX;
         QStringList aAxisY;
@@ -1039,6 +1146,9 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
         QDomElement aSourceStep = aTopDocument.createElement("SourceStep");
         aSourceStep.setAttribute("href", "");
         aFiles.appendChild(aSourceStep);
+        QDomElement aToolFile = aTopDocument.createElement("Tool");
+        aToolFile.setAttribute("href", "welding gun.stp");
+        aFiles.appendChild(aToolFile);
         aTopRoot.appendChild(aFiles);
 
         // 当前 UI 没有单独编辑杆件名称与 href，因此先按既有固定命名写出默认资源清单。
@@ -1081,6 +1191,18 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
             aKinematics.appendChild(aJoint);
         }
         aTopRoot.appendChild(aKinematics);
+
+        QDomElement aToolElement = aTopDocument.createElement("Tool");
+        aToolElement.setAttribute("enabled", "true");
+        QDomElement aTcpElement = aTopDocument.createElement("Tcp");
+        aTcpElement.setAttribute("x", aTcpValues[0]);
+        aTcpElement.setAttribute("y", aTcpValues[1]);
+        aTcpElement.setAttribute("z", aTcpValues[2]);
+        aTcpElement.setAttribute("rx", aTcpValues[3]);
+        aTcpElement.setAttribute("ry", aTcpValues[4]);
+        aTcpElement.setAttribute("rz", aTcpValues[5]);
+        aToolElement.appendChild(aTcpElement);
+        aTopRoot.appendChild(aToolElement);
 
         QString anErrorMessage;
         if (!saveXmlDocument(aRobotDocument, QDir(aSavePath).filePath("robot.xml"), &anErrorMessage))

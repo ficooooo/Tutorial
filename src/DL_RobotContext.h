@@ -52,6 +52,10 @@ private://两个库共用的数据
     QString     m_robotDirPath;
     //当前单 STEP 预览文件，供拆分流程直接复用。
     QString     m_previewStepFileName;
+    //焊枪几何文件路径，来自 Top.xml 的 Files/Tool.href。
+    QString     m_toolFileName;
+    //当前 Top.xml 是否启用焊枪配置。
+    bool        m_isToolEnabled;
     //杆件名称，按 base 到 flange 的顺序保存。
     QString     m_rodNames[DL_ROBOT_JOINT_COUNT + 1];
     //杆件几何文件路径，优先来自 Top.xml，缺省时回退旧命名规则。
@@ -116,13 +120,16 @@ private://以上两个库对象初始化
     void              loadMdlModel(const char* xmlFileName);
 //--------------------------------------------------------------------------------------------
 private://与焊枪有关的模型和数据
-    // TCP 相对法兰的位姿，以及其逆变换。
+    // OCC 显示层使用的 TCP 相对法兰位姿，平移单位为 mm。
+    gp_Trsf m_tfTCPDisplay;
+    // RL 计算层使用的 TCP 相对法兰位姿，平移单位为 m。
     gp_Trsf m_tfTCP;
+    // RL 计算层使用的 TCP 逆变换。
     gp_Trsf m_tfTCPInv;
 public:
     // 加载工具几何模型，并附着到末端杆件。
-    void loadTool(const char* modelFileName);
-    // 设置 TCP 变换，并同步到已加载的工具显示对象。
+    void loadTool(const char* modelFileName, const gp_Trsf& theDisplayTransform = gp_Trsf());
+    // 设置 RL 计算层使用的 TCP 变换；OCC 显示层另用 m_tfTCPDisplay 保存 mm 单位偏置。
     void setTcp(const gp_Trsf& theTransform);
 
 public://两个库之间的核心数据(结构)转换
