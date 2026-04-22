@@ -146,7 +146,19 @@ void ApplicationTut::onMakeBottleAction()
 
     statusBar()->showMessage( QObject::tr("INF_MAKE_BOTTLE"), 5000 );
 
-    nMaxJoint_Count = doc->onMakeBottle();
+    const int aLoadResult = doc->onMakeBottle();
+
+    // 取消选择或加载失败时，不破坏当前窗口里已加载机器人的状态。
+    if (aLoadResult == 0)
+    {
+        if (nMaxJoint_Count > 0)
+        {
+            statusBar()->showMessage(QString("Current Joint: J#")+QString::number(nCurrentJoint_Index+1)+" of "+QString::number(nMaxJoint_Count));
+        }
+        return;
+    }
+
+    nMaxJoint_Count = aLoadResult;
     nCurrentJoint_Index = 0;
 
     if (nMaxJoint_Count > 0)

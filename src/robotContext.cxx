@@ -499,7 +499,12 @@ void DL_RobotContext::loadAISShapes()
     }
 
     Handle(AIS_Trihedron) aTrihedron = createEndTrihedron(aTriPoint, aTriNormal, aTriXAxis);
-    m_listRods[DL_ROBOT_JOINT_COUNT]->AddChildWithCurrentTransformation(aTrihedron);
+    if (!m_listRods[DL_ROBOT_JOINT_COUNT].IsNull())
+    {
+        // 与 done/robot.cxx 保持一致：在零位下先把末端坐标系挂到 rod6，
+        // 后续只靠父子层级随法兰/焊枪末端运动。
+        m_listRods[DL_ROBOT_JOINT_COUNT]->AddChild(aTrihedron);
+    }
     m_context->Display(aTrihedron, Standard_False);
 
     if (hasToolFile)
@@ -535,6 +540,7 @@ void DL_RobotContext::forwardRobot()
     for (std::size_t i = 0; i < dof; ++i) q(i) = m_listJoints_angles[i];
     m_rl_mdl_KinematicModel->setPosition(q);
     m_rl_mdl_KinematicModel->forwardPosition();
+
     updateTraceLine();
 }
 
@@ -1023,7 +1029,7 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
 
     QLineEdit* aTcpEdits[6] = {nullptr};
     QStringList aTcpLabels = QStringList() << "Tcp X(mm)" << "Tcp Y(mm)" << "Tcp Z(mm)"
-                                           << "Tcp Rx(°)" << "Tcp Ry(°)" << "Tcp Rz(°)";
+                                           << "Tcp Rx(Degree)" << "Tcp Ry(Degree)" << "Tcp Rz(Degree)";
     for (int i = 0; i < 6; ++i)
     {
         const int aRow = 2 + i / 3;
@@ -1050,8 +1056,8 @@ void DL_RobotContext::writeRobotXml(QWidget* theParent)
     }
     aGrid->setColumnMinimumWidth(2, 20);
 
-    QLabel* aMinTitle = new QLabel("Min(°)");
-    QLabel* aMaxTitle = new QLabel("Max(°)");
+    QLabel* aMinTitle = new QLabel("Min(Degree)");
+    QLabel* aMaxTitle = new QLabel("Max(Degree)");
     QLabel* aSpeedTitle = new QLabel("MaxSpeed");
     aMinTitle->setAlignment(Qt::AlignCenter);
     aMaxTitle->setAlignment(Qt::AlignCenter);

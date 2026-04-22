@@ -187,6 +187,11 @@ void ApplicationTut::onJointSelect()
 
 void ApplicationTut::onJointForward()
 {
+    if (nMaxJoint_Count <= 0)
+    {
+        return;
+    }
+
     DocumentTut* aDocument = activeDocument(getWorkspace());
     if (aDocument != NULL)
     {
@@ -196,6 +201,11 @@ void ApplicationTut::onJointForward()
 
 void ApplicationTut::onJointBckward()
 {
+    if (nMaxJoint_Count <= 0)
+    {
+        return;
+    }
+
     DocumentTut* aDocument = activeDocument(getWorkspace());
     if (aDocument != NULL)
     {
@@ -249,7 +259,10 @@ int DocumentTut::onMakeBottle()
 
     int nBjoint = getRobot()->loadRobotDynamic(ApplicationCommonWindow::getWorkspace());
 
-    fitAll();
+    if (0 != nBjoint)
+    {
+        fitAll();
+    }
     QApplication::restoreOverrideCursor();
 
     return nBjoint;
