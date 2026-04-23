@@ -244,6 +244,18 @@ gp_Trsf buildTcpPoseTransform(const double theX,
     aTransform.Multiply(aRotX);
     return aTransform;
 }
+
+// 同一把焊枪在不同 wrist pose 下，STEP 模型局部系到法兰安装系之间存在固定装配修正。
+// 这里把该修正单独抽出来，确保 OCC 显示和 RL TCP 计算共用同一套姿态补偿。
+gp_Trsf buildToolMountTransform(const bool theIsPose1)
+{
+    gp_Trsf aTransform;
+    if (!theIsPose1)
+        return aTransform;
+
+    aTransform.SetRotation(gp_Ax1(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 1.0, 0.0)), -90.0 * rl::math::DEG2RAD);
+    return aTransform;
+}
 }
 
 DL_RobotContext::DL_RobotContext(const Handle(AIS_InteractiveContext)& theContext)
@@ -511,7 +523,8 @@ void DL_RobotContext::loadAISShapes()
     {
         gp_Trsf aToolDisplayTransform;
         aToolDisplayTransform.SetTranslation(gp_Vec(aFlangePoint.X(), aFlangePoint.Y(), aFlangePoint.Z()));
-        // 约定焊枪模型原点就在安装中心，因此工具模型仅需先落到原始法兰末端位置。
+        // 工具网格与 TCP 计算共用同一套姿态装配修正，避免“模型装对了但坐标系没跟上”。
+        aToolDisplayTransform.Multiply(buildToolMountTransform(m_isPose1));
         loadTool(m_toolFileName.toLocal8Bit().constData(), aToolDisplayTransform);
     }
 }
@@ -708,6 +721,7 @@ int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* th
     QDomElement aKinematics = aRoot.firstChildElement("Kinematics");
     QString aPose = aKinematics.attribute("pose", "case1").toLower();
     bool isPose1 = ("case2" != aPose);
+    m_isPose1 = isPose1;
     QDomElement aDimensionsElement = aKinematics.firstChildElement("Dimensions");
     QStringList aDimensions;
     aDimensions << aDimensionsElement.attribute("R", "0")
@@ -771,6 +785,19 @@ int DL_RobotContext::loadRobotFromXml(const QString& theXmlFileName, QWidget* th
         clearRobotPresentation();
         const QString aResolvedToolFile = resolveHref(m_robotDirPath, aToolHref);
         const bool hasUsableTool = aToolEnabled && !aResolvedToolFile.isEmpty() && QFileInfo::exists(aResolvedToolFile);
+        if (hasUsableTool)
+        {
+            const gp_Trsf aToolMountTransform = buildToolMountTransform(isPose1);
+
+            gp_Trsf aMountedTcpDisplayTransform = aToolMountTransform;
+            aMountedTcpDisplayTransform.Multiply(aTcpDisplayTransform);
+            aTcpDisplayTransform = aMountedTcpDisplayTransform;
+
+            gp_Trsf aMountedTcpModelTransform = aToolMountTransform;
+            aMountedTcpModelTransform.Multiply(aTcpModelTransform);
+            aTcpModelTransform = aMountedTcpModelTransform;
+        }
+
         m_toolFileName = hasUsableTool ? aResolvedToolFile : QString();
         m_isToolEnabled = hasUsableTool;
         m_tfTCPDisplay = hasUsableTool ? aTcpDisplayTransform : gp_Trsf();
