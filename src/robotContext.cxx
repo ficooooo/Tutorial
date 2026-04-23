@@ -567,8 +567,22 @@ void DL_RobotContext::resetRobot()
 bool DL_RobotContext::ikSolve(const rl::math::Transform& theTransform, double theAngles[], bool isFromTcp)
 {
     if (!isLoaded() || !theAngles) return false;
+    const std::size_t dof = m_rl_mdl_KinematicModel->getDof();
+    rl::math::Vector qSeed(dof);
+    for (std::size_t i = 0; i < dof; ++i) qSeed(i) = m_listJoints_angles[i];
+
+    // RL 的数值逆解会从当前模型关节状态附近搜索；用上一显示姿态作初值可避免跳到远端解支。
+    m_rl_mdl_KinematicModel->setPosition(qSeed);
+    m_rl_mdl_KinematicModel->forwardPosition();
+
     rl::math::Transform aGoal = isFromTcp ? theTransform * trans(m_tfTCPInv) : theTransform;
-    if (!m_rl_mdl_KinematicModel->calculateInversePosition(aGoal, 0, 0.5)) return false;
+    if (!m_rl_mdl_KinematicModel->calculateInversePosition(aGoal, 0, 0.5))
+    {
+        m_rl_mdl_KinematicModel->setPosition(qSeed);
+        m_rl_mdl_KinematicModel->forwardPosition();
+        return false;
+    }
+
     rl::math::Vector q = m_rl_mdl_KinematicModel->getPosition();
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i) theAngles[i] = q(i);
     return true;
@@ -904,17 +918,14 @@ void DL_RobotContext::calcRobot()
     }
     std::cout << "=====================================================" << std::endl;
 
-    rl::math::Vector q(dof), q0(dof), qinv(dof);
-    for (std::size_t i = 0; i < dof; ++i) { q(i) = m_listJoints_angles[i]; q0(i) = m_listJoints_angles0[i]; }
+    rl::math::Vector q(dof), qinv(dof);
+    for (std::size_t i = 0; i < dof; ++i) q(i) = m_listJoints_angles[i];
     const bool isUsingToolTcp = !m_ASTool.IsNull();
     rl::math::Transform t = forwardSolve(m_listJoints_angles, isUsingToolTcp);
     std::cout << "rl依据xml计算末端坐标 (X,Y,Z): " << t.translation().x() << ", " << t.translation().y() << ", " << t.translation().z() << std::endl;
 
     gp_Pnt aWorldPoint = m_endTrihedron->Component()->Location().Transformed(m_endTrihedron->Transformation());
     std::cout << "OCC 真实末端坐标 (X,Y,Z): " << aWorldPoint.X() << ", " << aWorldPoint.Y() << ", " << aWorldPoint.Z() << std::endl;
-
-    m_rl_mdl_KinematicModel->setPosition(q0);
-    m_rl_mdl_KinematicModel->forwardPosition();
 
     double aAngles[DL_ROBOT_JOINT_COUNT] = {0.0};
     if (!ikSolve(t, aAngles, isUsingToolTcp)) { std::printf("错误：逆解计算失败，无法到达目标位姿。\n"); return; }
