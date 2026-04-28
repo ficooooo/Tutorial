@@ -1,5 +1,6 @@
 ﻿#include "ApplicationTut.h"
 #include "DocumentTut.h"
+#include "DL_RobotContext.h"
 
 #include <OSD_Environment.hxx>
 
@@ -163,6 +164,7 @@ void ApplicationTut::onMakeBottleAction()
 
     if (nMaxJoint_Count > 0)
     {
+        doc->getRobot()->setActiveJoint(nCurrentJoint_Index);
         statusBar()->showMessage(QString("Current Joint: J#")+QString::number(nCurrentJoint_Index+1)+" of "+QString::number(nMaxJoint_Count));
     }
     else if (nMaxJoint_Count < 0)

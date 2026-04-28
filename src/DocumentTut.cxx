@@ -182,6 +182,12 @@ void ApplicationTut::onJointSelect()
     if(nCurrentJoint_Index==nMaxJoint_Count)
         nCurrentJoint_Index = 0;
 
+    DocumentTut* aDocument = activeDocument(getWorkspace());
+    if (aDocument != NULL)
+    {
+        aDocument->getRobot()->setActiveJoint(nCurrentJoint_Index);
+    }
+
     statusBar()->showMessage(QString("Current Joint: J#")+QString::number(nCurrentJoint_Index+1)+" of "+QString::number(nMaxJoint_Count));
 }
 

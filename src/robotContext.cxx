@@ -28,6 +28,8 @@
 #include <QCoreApplication>
 #include <QDialog>
 #include <QDir>
+#include <QEventLoop>
+#include <QThread>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -256,11 +258,51 @@ gp_Trsf buildToolMountTransform(const bool theIsPose1)
     aTransform.SetRotation(gp_Ax1(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 1.0, 0.0)), -90.0 * rl::math::DEG2RAD);
     return aTransform;
 }
+
+struct CubicPolynomial
+{
+    double a0;
+    double a1;
+    double a2;
+    double a3;
+
+    double value(const double theTimeMs) const
+    {
+        return a0
+             + a1 * theTimeMs
+             + a2 * theTimeMs * theTimeMs
+             + a3 * theTimeMs * theTimeMs * theTimeMs;
+    }
+};
+
+// 用最简单的边界条件构造三次多项式：
+// q(0)=q0, q(T)=qT, q'(0)=0, q'(T)=0
+// 这里时间变量直接使用 ms，便于和 for 循环里的 20ms 步长一一对应。
+CubicPolynomial buildJointCubicPolynomial(const double theStartAngle,
+                                          const double theTargetAngle,
+                                          const double theDurationMs)
+{
+    CubicPolynomial aPolynomial = {theStartAngle, 0.0, 0.0, 0.0};
+    if (theDurationMs <= 0.0)
+    {
+        aPolynomial.a0 = theTargetAngle;
+        return aPolynomial;
+    }
+
+    const double aDelta = theTargetAngle - theStartAngle;
+    const double aDuration2 = theDurationMs * theDurationMs;
+    const double aDuration3 = aDuration2 * theDurationMs;
+    //系数的计算公式
+    aPolynomial.a2 = 3.0 * aDelta / aDuration2;
+    aPolynomial.a3 = -2.0 * aDelta / aDuration3;
+    return aPolynomial;
+}
+
 }
 
 DL_RobotContext::DL_RobotContext(const Handle(AIS_InteractiveContext)& theContext)
 : m_context(theContext), m_paramR(0.0), m_paramH(0.0), m_paramL2(0.0), m_paramS(0.0),
-  m_paramL3(0.0), m_paramD(0.0), m_paramW(0.0), m_isPose1(true)
+  m_paramL3(0.0), m_paramD(0.0), m_paramW(0.0), m_isPose1(true), m_activeJointIndex(-1)
 {
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i) { m_listJoints_angles[i] = 0.0; m_listJoints_angles0[i] = 0.0; }
     for (int i = 0; i <= DL_ROBOT_JOINT_COUNT; ++i)
@@ -439,6 +481,26 @@ void DL_RobotContext::clearRobotPresentation()
     m_rl_mdl_IKSolver.reset();
     m_rl_mdl_KinematicModel.reset();
     m_rl_mdl_Model.reset();
+    m_activeJointIndex = -1;
+}
+
+void DL_RobotContext::updateJointSelectionVisual()
+{
+    if (m_context.IsNull()) return;
+
+    const Quantity_Color aHighlightColor(1.0, 0.75, 0.10, Quantity_TOC_RGB);
+    for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i)
+    {
+        if (m_listRods[i + 1].IsNull()) continue;
+        if (i == m_activeJointIndex) m_context->SetColor(m_listRods[i + 1], aHighlightColor, Standard_False);
+        else m_context->UnsetColor(m_listRods[i + 1], Standard_False);
+    }
+
+    if (!m_ASTool.IsNull())
+    {
+        if (m_activeJointIndex == DL_ROBOT_JOINT_COUNT - 1) m_context->SetColor(m_ASTool, aHighlightColor, Standard_False);
+        else m_context->UnsetColor(m_ASTool, Standard_False);
+    }
 }
 
 void DL_RobotContext::updateTraceLine()
@@ -527,6 +589,8 @@ void DL_RobotContext::loadAISShapes()
         aToolDisplayTransform.Multiply(buildToolMountTransform(m_isPose1));
         loadTool(m_toolFileName.toLocal8Bit().constData(), aToolDisplayTransform);
     }
+
+    updateJointSelectionVisual();
 }
 
 void DL_RobotContext::loadAll()
@@ -561,6 +625,13 @@ void DL_RobotContext::resetRobot()
 {
     for (int i = 0; i < DL_ROBOT_JOINT_COUNT; ++i) m_listJoints_angles[i] = m_listJoints_angles0[i];
     forwardRobot();
+    if (!m_context.IsNull()) m_context->UpdateCurrentViewer();
+}
+
+void DL_RobotContext::setActiveJoint(int theIndex)
+{
+    m_activeJointIndex = (theIndex >= 0 && theIndex < DL_ROBOT_JOINT_COUNT) ? theIndex : -1;
+    updateJointSelectionVisual();
     if (!m_context.IsNull()) m_context->UpdateCurrentViewer();
 }
 
@@ -899,7 +970,24 @@ bool DL_RobotContext::previewStepFile(const QString& theFileName, QWidget* thePa
 void DL_RobotContext::moveJoint(int theIndex, int theForward)
 {
     if (!isLoaded() || theIndex < 0 || theIndex >= DL_ROBOT_JOINT_COUNT) return;
-    m_listJoints_angles[theIndex] += theForward * 5.0 * rl::math::DEG2RAD;
+    setActiveJoint(theIndex);
+
+    const double aStartAngle = m_listJoints_angles[theIndex];//动画起始角度为当前角度
+    const double aTargetAngle = aStartAngle + theForward * 5.0 * rl::math::DEG2RAD;//目标角度为5°对应前进后退按钮
+    const int aDurationMs = 100;//总动画时间（但不是严格每次都是此事件，每次循环的休眠总时间才是一次动画真正运行时间  ）
+    const int aSampleMs = 20;
+    const CubicPolynomial aPolynomial = buildJointCubicPolynomial(aStartAngle, aTargetAngle, static_cast<double>(aDurationMs));
+
+    for (int aElapsedMs = 0; aElapsedMs <= aDurationMs; aElapsedMs += aSampleMs)
+    {
+        m_listJoints_angles[theIndex] = aPolynomial.value(static_cast<double>(aElapsedMs));
+        forwardRobot();
+        if (!m_context.IsNull()) m_context->UpdateCurrentViewer();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        if (aElapsedMs < aDurationMs) QThread::msleep(aSampleMs);
+    }
+
+    m_listJoints_angles[theIndex] = aTargetAngle;
     forwardRobot();
     if (!m_context.IsNull()) m_context->UpdateCurrentViewer();
 }

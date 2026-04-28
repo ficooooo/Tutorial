@@ -89,6 +89,8 @@ public:
     void              resetRobot();
     // 将当前关节角同步到 OCC 显示层与 RL 正解模型。
     void              forwardRobot();
+    // 设置当前选中的关节，用于显示层高亮提示。
+    void              setActiveJoint(int theIndex);
     // 返回当前机器人杆件数量。
     int               getRodShapeCount() const;
     // 按索引访问单个杆件显示对象。
@@ -165,6 +167,8 @@ public:
 private:
     // 移除当前机器人相关显示对象，并重置内部状态。
     void                  clearRobotPresentation();
+    // 根据 m_activeJointIndex 刷新当前选中关节的显示颜色。
+    void                  updateJointSelectionVisual();
     // 更新原点到末端的辅助轨迹线。
     void                  updateTraceLine();
     // 从 m_robotXmlFileName 读入并缓存 RL XML 文档。
@@ -190,6 +194,7 @@ private:
     double m_paramD;
     double m_paramW;
     bool   m_isPose1;
+    int    m_activeJointIndex;
 
 public:
     // 视图切换时刷新当前 AIS 上下文。
